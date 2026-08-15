@@ -49,11 +49,27 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
         ref={canvasRef}
         width={width}
         height={height}
-        onPointerDown={handlePointerDown}
+        draggable={false}
+        onPointerDown={(e) => {
+          // Once the canvas has pixels on it, browsers let you drag it like
+          // an image — that native drag gesture hijacks the pointer sequence
+          // and would otherwise swallow every stroke after the first.
+          // preventDefault + the draggable/onDragStart guards below are
+          // enough to stop that; deliberately NOT using setPointerCapture
+          // here — it can get stuck active across browsers when combined
+          // with preventDefault, silently blocking every stroke after the
+          // one where it got stuck (that's what caused the "every other
+          // stroke fails" bug).
+          e.preventDefault();
+          handlePointerDown(e);
+        }}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
         onPointerLeave={handlePointerUp}
-        className="touch-none rounded-lg border border-neutral-300 bg-white shadow-sm"
+        onDragStart={(e) => e.preventDefault()}
+        className="touch-none select-none rounded-lg border border-neutral-300 bg-white shadow-sm"
+        style={{ WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
       />
     );
   }

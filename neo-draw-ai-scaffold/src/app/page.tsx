@@ -21,7 +21,7 @@ const USE_MOCK_AI = true;
 
 export default function Home() {
   const canvasHandle = useRef<DrawingCanvasHandle>(null);
-  const [inputMode, setInputMode] = useState<InputMode>("mouse");
+  const [inputMode, setInputMode] = useState<InputMode>("draw");
   // Starts null (same on server + client) and is filled in on mount so
   // Math.random() never runs during SSR — avoids a hydration mismatch,
   // since the server's random pick would differ from the client's.

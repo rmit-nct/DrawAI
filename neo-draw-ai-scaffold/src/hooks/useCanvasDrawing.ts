@@ -58,8 +58,13 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
   }, [color, lineWidth]);
 
   const endStroke = useCallback(() => {
-    if (currentStroke.current) {
-      setStrokes((prev) => [...prev, currentStroke.current as Stroke]);
+    // Snapshot before clearing the ref below — setStrokes's updater runs
+    // later (at render time), so a closure reading currentStroke.current
+    // directly would see it already nulled out, silently dropping every
+    // stroke past the first into the array as `null`.
+    const finishedStroke = currentStroke.current;
+    if (finishedStroke) {
+      setStrokes((prev) => [...prev, finishedStroke]);
     }
     currentStroke.current = null;
     isDrawing.current = false;

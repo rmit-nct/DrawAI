@@ -1,6 +1,10 @@
 // Core shared types for NEO DrawAI
 
-export type InputMode = "mouse" | "touch" | "webcam";
+// "draw" covers both mouse and touch — the Pointer Events API already
+// unifies them into one event model, so there's no real behavioral
+// difference to toggle between. "webcam" is the one genuinely different
+// input path (hand-tracking driven).
+export type InputMode = "draw" | "webcam";
 
 export interface Point {
   x: number;

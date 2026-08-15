@@ -10,6 +10,11 @@ interface ToolbarProps {
   secondsLeft: number;
 }
 
+const MODE_LABELS: Record<InputMode, string> = {
+  draw: "Draw", // mouse + touch, unified — Pointer Events handle both natively
+  webcam: "Webcam",
+};
+
 export function Toolbar({
   inputMode,
   onInputModeChange,
@@ -20,17 +25,17 @@ export function Toolbar({
   return (
     <div className="flex w-full max-w-[800px] items-center justify-between rounded-lg bg-neutral-100 px-4 py-2">
       <div className="flex gap-2">
-        {(["mouse", "touch", "webcam"] as InputMode[]).map((mode) => (
+        {(["draw", "webcam"] as InputMode[]).map((mode) => (
           <button
             key={mode}
             onClick={() => onInputModeChange(mode)}
-            className={`rounded-md px-3 py-1 text-sm capitalize transition ${
+            className={`rounded-md px-3 py-1 text-sm transition ${
               inputMode === mode
                 ? "bg-neutral-900 text-white"
                 : "bg-white text-neutral-600 hover:bg-neutral-200"
             }`}
           >
-            {mode}
+            {MODE_LABELS[mode]}
           </button>
         ))}
       </div>
