@@ -1,28 +1,42 @@
 "use client";
 
-import { forwardRef, useImperativeHandle } from "react";
+import { forwardRef, useImperativeHandle, type ReactNode } from "react";
 import { useCanvasDrawing } from "@/hooks/useCanvasDrawing";
-import { canvasToBase64 } from "@/lib/canvas/drawing";
+import { CANVAS_ASPECT, exportDrawing } from "@/lib/canvas/drawing";
+import type { Point, Stroke } from "@/types";
 
 export interface DrawingCanvasHandle {
   undo: () => void;
+  redo: () => void;
   clear: () => void;
-  exportBase64: () => string | null;
+  getStrokes: () => Stroke[];
+  exportBase64: (maxWidth?: number) => string | null;
   // used by webcam gesture input to drive the same drawing logic as mouse/touch
-  startStrokeAt: ReturnType<typeof useCanvasDrawing>["startStrokeAt"];
-  extendStrokeTo: ReturnType<typeof useCanvasDrawing>["extendStrokeTo"];
+  startStrokeAt: (point: Point) => void;
+  extendStrokeTo: (point: Point) => void;
   endStroke: () => void;
 }
 
 interface DrawingCanvasProps {
-  width?: number;
-  height?: number;
   color?: string;
   lineWidth?: number;
+  disabled?: boolean;
+  onStrokesChange?: (strokeCount: number) => void;
+  /** Overlay rendered above the canvas (round-over card, fingertip cursor…). */
+  children?: ReactNode;
 }
 
+/**
+ * Responsive drawing surface.
+ *
+ * The canvas element used to carry hard-coded width={800} height={600}
+ * attributes, which overflowed every phone viewport and rendered blurry on
+ * high-DPI screens. It is now fluid: CSS gives it a 4:3 box, and the hook sizes
+ * the backing store to the real box × devicePixelRatio, so strokes stay sharp
+ * and the drawing survives resizes and orientation changes.
+ */
 export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
-  function DrawingCanvas({ width = 800, height = 600, color, lineWidth }, ref) {
+  function DrawingCanvas({ color, lineWidth, disabled = false, onStrokesChange, children }, ref) {
     const {
       canvasRef,
       handlePointerDown,
@@ -31,30 +45,49 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       startStrokeAt,
       extendStrokeTo,
       endStroke,
+      getStrokes,
       undo,
+      redo,
       clear,
-    } = useCanvasDrawing({ color, lineWidth });
+    } = useCanvasDrawing({ color, lineWidth, disabled, onStrokesChange });
 
-    useImperativeHandle(ref, () => ({
-      undo,
-      clear,
-      exportBase64: () => (canvasRef.current ? canvasToBase64(canvasRef.current) : null),
-      startStrokeAt,
-      extendStrokeTo,
-      endStroke,
-    }));
+    useImperativeHandle(
+      ref,
+      () => ({
+        undo,
+        redo,
+        clear,
+        getStrokes,
+        exportBase64: (maxWidth?: number) => exportDrawing(getStrokes(), maxWidth),
+        startStrokeAt,
+        extendStrokeTo,
+        endStroke,
+      }),
+      [undo, redo, clear, getStrokes, startStrokeAt, extendStrokeTo, endStroke]
+    );
 
     return (
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-        className="touch-none rounded-lg border border-neutral-300 bg-white shadow-sm"
-      />
+      <div className="relative w-full">
+        {/* Amber offset slab — the logo's signature highlight, as a frame. */}
+        <div
+          aria-hidden
+          className="absolute inset-0 translate-x-2 translate-y-2 rounded-2xl bg-nct-amber/85"
+        />
+        <div className="relative overflow-hidden rounded-2xl border border-nct-steel/40 bg-white shadow-[0_24px_60px_-30px_rgba(0,0,0,0.95)]">
+          <canvas
+            ref={canvasRef}
+            style={{ aspectRatio: CANVAS_ASPECT }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            aria-label="Drawing canvas"
+            role="img"
+            className={`nct-canvas block w-full ${disabled ? "pointer-events-none" : ""}`}
+          />
+          {children}
+        </div>
+      </div>
     );
   }
 );

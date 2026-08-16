@@ -1,58 +1,157 @@
 import type { Point, Stroke } from "@/types";
 
 /**
- * Pure canvas drawing helpers. Kept framework-agnostic so they can be
- * called from mouse events, touch events, or MediaPipe hand-tracking
- * output without duplicating logic.
+ * Pure canvas drawing helpers.
+ *
+ * Coordinate model
+ * ----------------
+ * Every stroke is stored in a fixed LOGICAL space (800x600). The visible canvas
+ * can be any CSS size and any devicePixelRatio; `applyCanvasTransform` maps
+ * logical -> device pixels at paint time. That keeps drawings sharp on retina
+ * screens, keeps them intact when the window is resized, and lets webcam
+ * (normalised 0-1) and pointer input feed the exact same numbers.
  */
 
+export const LOGICAL_WIDTH = 800;
+export const LOGICAL_HEIGHT = 600;
+export const CANVAS_ASPECT = LOGICAL_WIDTH / LOGICAL_HEIGHT;
+
+export const CANVAS_BACKGROUND = "#FFFFFF";
+
+/**
+ * Size the backing store for the current CSS box + DPR and set a transform so
+ * all subsequent drawing can use logical (800x600) coordinates.
+ * Returns false when the canvas has no layout box yet.
+ */
+export function applyCanvasTransform(canvas: HTMLCanvasElement): boolean {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return false;
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 3); // cap: 4x DPR backing stores get expensive
+  const targetW = Math.round(rect.width * dpr);
+  const targetH = Math.round(rect.height * dpr);
+
+  // Only resize when needed — assigning width/height wipes the canvas.
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    canvas.width = targetW;
+    canvas.height = targetH;
+  }
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return false;
+
+  const scale = targetW / LOGICAL_WIDTH;
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  return true;
+}
+
 export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke | null | undefined) {
-  if (!stroke || !stroke.points || stroke.points.length < 2) return;
+  if (!stroke || !stroke.points || stroke.points.length === 0) return;
 
   ctx.save();
   ctx.strokeStyle = stroke.color;
+  ctx.fillStyle = stroke.color;
   ctx.lineWidth = stroke.lineWidth;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  ctx.beginPath();
-  ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-  for (let i = 1; i < stroke.points.length; i++) {
-    ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+  const pts = stroke.points;
+
+  // A tap / click with no drag is a dot, not a no-op.
+  if (pts.length === 1) {
+    ctx.beginPath();
+    ctx.arc(pts[0].x, pts[0].y, stroke.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return;
   }
+
+  // Quadratic smoothing through midpoints — removes the polygonal look of raw
+  // pointer samples and most of the jitter in hand-tracked points.
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const midX = (pts[i].x + pts[i + 1].x) / 2;
+    const midY = (pts[i].y + pts[i + 1].y) / 2;
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
+  }
+  ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
   ctx.stroke();
   ctx.restore();
 }
 
+/** Repaint everything: background + committed strokes + the in-progress stroke. */
 export function redrawAll(
   canvas: HTMLCanvasElement,
   strokes: Stroke[],
-  backgroundColor = "#ffffff"
+  current?: Stroke | null,
+  backgroundColor = CANVAS_BACKGROUND
 ) {
+  if (!applyCanvasTransform(canvas)) return;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
   ctx.fillStyle = backgroundColor;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
 
-  for (const stroke of strokes) {
-    drawStroke(ctx, stroke);
-  }
+  for (const stroke of strokes) drawStroke(ctx, stroke);
+  if (current) drawStroke(ctx, current);
 }
 
+/** Client (viewport) coordinates -> logical canvas coordinates, clamped to the canvas. */
 export function getRelativePoint(
   canvas: HTMLCanvasElement,
   clientX: number,
   clientY: number
 ): Point {
   const rect = canvas.getBoundingClientRect();
+  const x = ((clientX - rect.left) / rect.width) * LOGICAL_WIDTH;
+  const y = ((clientY - rect.top) / rect.height) * LOGICAL_HEIGHT;
+  return { x: clamp(x, 0, LOGICAL_WIDTH), y: clamp(y, 0, LOGICAL_HEIGHT) };
+}
+
+/** Normalised 0-1 coordinates (MediaPipe) -> logical canvas coordinates. */
+export function normalizedToLogical(nx: number, ny: number, mirrorX = true): Point {
   return {
-    x: ((clientX - rect.left) / rect.width) * canvas.width,
-    y: ((clientY - rect.top) / rect.height) * canvas.height,
+    x: clamp((mirrorX ? 1 - nx : nx) * LOGICAL_WIDTH, 0, LOGICAL_WIDTH),
+    y: clamp(ny * LOGICAL_HEIGHT, 0, LOGICAL_HEIGHT),
   };
 }
 
-/** Export the current canvas as a base64 PNG, e.g. to send to an AI guesser. */
+export function clamp(v: number, min: number, max: number): number {
+  return v < min ? min : v > max ? max : v;
+}
+
+/** True when there is nothing but background on the canvas. */
+export function isBlank(strokes: Stroke[]): boolean {
+  return strokes.every((s) => !s.points || s.points.length === 0);
+}
+
+/**
+ * Render the drawing to an offscreen canvas and return a base64 PNG.
+ * Off-screen so the export is identical no matter how large the canvas is on
+ * screen, and always on opaque white (transparent PNGs confuse vision models).
+ */
+export function exportDrawing(strokes: Stroke[], maxWidth = LOGICAL_WIDTH): string | null {
+  if (typeof document === "undefined") return null;
+
+  const scale = Math.min(1, maxWidth / LOGICAL_WIDTH);
+  const off = document.createElement("canvas");
+  off.width = Math.round(LOGICAL_WIDTH * scale);
+  off.height = Math.round(LOGICAL_HEIGHT * scale);
+
+  const ctx = off.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.fillStyle = CANVAS_BACKGROUND;
+  ctx.fillRect(0, 0, off.width, off.height);
+  ctx.scale(scale, scale);
+  for (const stroke of strokes) drawStroke(ctx, stroke);
+
+  return off.toDataURL("image/png").split(",")[1] ?? null;
+}
+
+/** Export the visible canvas element as a base64 PNG (no data-url prefix). */
 export function canvasToBase64(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL("image/png").split(",")[1];
 }
