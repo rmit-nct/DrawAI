@@ -1,25 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Point, Stroke } from "@/types";
+import type { DrawTool, Point, Stroke } from "@/types";
 import { getRelativePoint, redrawAll } from "@/lib/canvas/drawing";
 
 interface UseCanvasDrawingOptions {
   lineWidth?: number;
   color?: string;
+  tool?: DrawTool;
+  eraserWidth?: number;
 }
 
 /**
- * Handles mouse + touch drawing on a canvas, plus undo/clear.
+ * Handles mouse + touch drawing on a canvas, plus undo/redo/clear.
  * External input (e.g. webcam hand-tracking) can call
  * startStrokeAt / extendStrokeTo / endStroke directly — same code path
  * as mouse/touch, so drawing logic never diverges by input source.
  */
 export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
-  const { lineWidth = 4, color = "#111111" } = options;
+  const { lineWidth = 4, color = "#111111", tool = "pen", eraserWidth = 24 } = options;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [redoStack, setRedoStack] = useState<Stroke[]>([]);
   const currentStroke = useRef<Stroke | null>(null);
   const isDrawing = useRef(false);
 
@@ -35,31 +38,48 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
   const startStrokeAt = useCallback(
     (point: Point) => {
       isDrawing.current = true;
-      currentStroke.current = { points: [point], color, lineWidth };
+      currentStroke.current = {
+        points: [point],
+        color,
+        lineWidth: tool === "eraser" ? eraserWidth : lineWidth,
+        tool,
+      };
     },
-    [color, lineWidth]
+    [color, lineWidth, tool, eraserWidth]
   );
 
   const extendStrokeTo = useCallback((point: Point) => {
     if (!isDrawing.current || !currentStroke.current || !canvasRef.current) return;
-    currentStroke.current.points.push(point);
+    const stroke = currentStroke.current;
+    stroke.points.push(point);
     const ctx = canvasRef.current.getContext("2d");
     if (ctx) {
-      const pts = currentStroke.current.points;
+      const pts = stroke.points;
       const prev = pts[pts.length - 2];
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth;
+      ctx.save();
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.lineWidth;
       ctx.lineCap = "round";
+      ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
       ctx.beginPath();
       ctx.moveTo(prev.x, prev.y);
       ctx.lineTo(point.x, point.y);
       ctx.stroke();
+      ctx.restore();
     }
-  }, [color, lineWidth]);
+  }, []);
 
   const endStroke = useCallback(() => {
-    if (currentStroke.current) {
-      setStrokes((prev) => [...prev, currentStroke.current as Stroke]);
+    // Snapshot before clearing the ref below — setStrokes's updater runs
+    // later (at render time), so a closure reading currentStroke.current
+    // directly would see it already nulled out, silently dropping every
+    // stroke past the first into the array as `null`.
+    const finishedStroke = currentStroke.current;
+    if (finishedStroke) {
+      setStrokes((prev) => [...prev, finishedStroke]);
+      // A fresh stroke invalidates whatever was undone before it — standard
+      // undo/redo semantics (redoing after a new action would be surprising).
+      setRedoStack([]);
     }
     currentStroke.current = null;
     isDrawing.current = false;
@@ -87,16 +107,31 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
   }, [endStroke]);
 
   const undo = useCallback(() => {
-    setStrokes((prev) => prev.slice(0, -1));
+    setStrokes((prev) => {
+      if (prev.length === 0) return prev;
+      setRedoStack((redo) => [...redo, prev[prev.length - 1]]);
+      return prev.slice(0, -1);
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    setRedoStack((prev) => {
+      if (prev.length === 0) return prev;
+      setStrokes((strokes) => [...strokes, prev[prev.length - 1]]);
+      return prev.slice(0, -1);
+    });
   }, []);
 
   const clear = useCallback(() => {
     setStrokes([]);
+    setRedoStack([]);
   }, []);
 
   return {
     canvasRef,
     strokes,
+    canUndo: strokes.length > 0,
+    canRedo: redoStack.length > 0,
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
@@ -105,6 +140,7 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
     extendStrokeTo,
     endStroke,
     undo,
+    redo,
     clear,
   };
 }

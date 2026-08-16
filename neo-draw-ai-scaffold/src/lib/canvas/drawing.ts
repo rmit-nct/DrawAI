@@ -14,6 +14,9 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke | null 
   ctx.lineWidth = stroke.lineWidth;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+  // Eraser strokes cut through whatever's already been painted instead of
+  // adding ink on top, so they work no matter what's underneath.
+  ctx.globalCompositeOperation = stroke.tool === "eraser" ? "destination-out" : "source-over";
 
   ctx.beginPath();
   ctx.moveTo(stroke.points[0].x, stroke.points[0].y);

@@ -1,6 +1,16 @@
 // Core shared types for NEO DrawAI
 
-export type InputMode = "mouse" | "touch" | "webcam";
+// "draw" covers both mouse and touch — the Pointer Events API already
+// unifies them into one event model, so there's no real behavioral
+// difference to toggle between. "webcam" is the one genuinely different
+// input path (hand-tracking driven).
+export type InputMode = "draw" | "webcam";
+
+// The active drawing tool: "pen" adds ink, "eraser" removes it from
+// whatever's already on the canvas (via destination-out compositing).
+export type DrawTool = "pen" | "eraser";
+
+export type BrushSize = "thin" | "medium" | "thick";
 
 export interface Point {
   x: number;
@@ -11,6 +21,7 @@ export interface Stroke {
   points: Point[];
   color: string;
   lineWidth: number;
+  tool: DrawTool;
 }
 
 export interface AIGuessResult {
