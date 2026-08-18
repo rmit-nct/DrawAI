@@ -151,9 +151,10 @@ overflow, coordinate accuracy on a scaled canvas, and DPR sharpness.
 
 | Name | GitHub | Role |
 |---|---|---|
-| _TBD_ | _TBD_ | _TBD_ |
-| _TBD_ | _TBD_ | _TBD_ |
-| _TBD_ | _TBD_ | _TBD_ |
+| Tran Vinh Trong | Dilson20 | developer |
+| Mai Ho Tuan Anh | _TBD_ | developer |
+| Tran Duc Khang | KhangTran13 | developer |
+| Tram Anh Tuan | TuanTram2401 | developer |
 
 *(Fill in as the team is finalized — this table is required in the final README per the project spec.)*
 
