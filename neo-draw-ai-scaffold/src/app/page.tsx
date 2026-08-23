@@ -6,11 +6,11 @@ import { WebcamGestureLayer } from "@/components/webcam/WebcamGestureLayer";
 import { AIGuessPanel } from "@/components/ai/AIGuessPanel";
 import { TopBar } from "@/components/ui/TopBar";
 import { RoundStatusBar } from "@/components/ui/RoundStatusBar";
+import type { PieTimerHandle } from "@/components/ui/PieTimer";
 import { Sidebar } from "@/components/ui/Sidebar";
 import { ModeSwitch } from "@/components/ui/ModeSwitch";
 import { Button } from "@/components/ui/button";
 import { Wand2 } from "lucide-react";
-import { useCountdownTimer } from "@/hooks/useCountdownTimer";
 import { getMockGuess } from "@/lib/ai/mockGuesser";
 import { getRandomPrompt } from "@/lib/prompts";
 import type { AIGuessResponse, BrushSize, DrawTool, InputMode } from "@/types";
@@ -36,6 +36,7 @@ const USE_MOCK_AI = true;
 
 export default function Home() {
   const canvasHandle = useRef<DrawingCanvasHandle>(null);
+  const pieTimerRef = useRef<PieTimerHandle>(null);
   const [inputMode, setInputMode] = useState<InputMode>("draw");
   const [tool, setTool] = useState<DrawTool>("pen");
   const [brushSize, setBrushSize] = useState<BrushSize>("medium");
@@ -51,9 +52,9 @@ export default function Home() {
     setPrompt(getRandomPrompt());
   }, []);
 
-  const { secondsLeft, isRunning, start, reset } = useCountdownTimer(ROUND_SECONDS, () => {
+  const onRoundExpire = useCallback(() => {
     // round over — could trigger a final AI guess / reveal here
-  });
+  }, []);
 
   const runAIGuess = useCallback(async () => {
     setAiLoading(true);
@@ -79,9 +80,8 @@ export default function Home() {
     canvasHandle.current?.clear();
     setPrompt(getRandomPrompt());
     setAiResult(null);
-    reset(ROUND_SECONDS);
-    start();
-  }, [reset, start]);
+    pieTimerRef.current?.restart();
+  }, []);
 
   const downloadDrawing = useCallback(() => {
     const base64 = canvasHandle.current?.exportBase64();
@@ -132,10 +132,10 @@ export default function Home() {
       <TopBar onNewRound={newRound} />
 
       <RoundStatusBar
+        ref={pieTimerRef}
         prompt={prompt}
-        secondsLeft={secondsLeft}
-        totalSeconds={ROUND_SECONDS}
-        isRunning={isRunning}
+        duration={ROUND_SECONDS}
+        onComplete={onRoundExpire}
       />
 
       <div className="relative z-10 grid grid-cols-1 gap-4 p-4 sm:grid-cols-[72px_1fr_320px]">

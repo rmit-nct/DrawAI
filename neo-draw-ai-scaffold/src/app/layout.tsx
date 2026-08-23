@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Geist, Baloo_2 } from "next/font/google";
+import localFont from "next/font/local";
 import { cn } from "@/lib/utils";
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
-// Playful, rounded display font for headings/prompts — Geist stays the
-// body/UI font so labels and buttons keep their crisp, neutral look.
 const baloo = Baloo_2({ subsets: ["latin"], variable: "--font-heading", weight: ["600", "700", "800"] });
+const coarse = localFont({ src: "../fonts/Coarserounded-8LYZ.otf", variable: "--font-topic" });
 
 export const metadata: Metadata = {
   title: "NEO DrawAI",
@@ -15,7 +15,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={cn("h-full antialiased", "font-sans", geist.variable, baloo.variable)}>
+    <html
+      lang="en"
+      className={cn("h-full antialiased", "font-sans", geist.variable, baloo.variable, coarse.variable)}
+    >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>{children}</body>
     </html>
   );
