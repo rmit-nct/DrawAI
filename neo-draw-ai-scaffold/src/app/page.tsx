@@ -5,6 +5,7 @@ import { DrawingCanvas, type DrawingCanvasHandle } from "@/components/canvas/Dra
 import { WebcamGestureLayer } from "@/components/webcam/WebcamGestureLayer";
 import { AIGuessPanel } from "@/components/ai/AIGuessPanel";
 import { TopBar } from "@/components/ui/TopBar";
+import { RoundStatusBar } from "@/components/ui/RoundStatusBar";
 import { Sidebar } from "@/components/ui/Sidebar";
 import { ModeSwitch } from "@/components/ui/ModeSwitch";
 import { Button } from "@/components/ui/button";
@@ -50,7 +51,7 @@ export default function Home() {
     setPrompt(getRandomPrompt());
   }, []);
 
-  const { secondsLeft, start, reset } = useCountdownTimer(ROUND_SECONDS, () => {
+  const { secondsLeft, isRunning, start, reset } = useCountdownTimer(ROUND_SECONDS, () => {
     // round over — could trigger a final AI guess / reveal here
   });
 
@@ -112,7 +113,7 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="relative grid min-h-screen grid-rows-[64px_1fr] overflow-hidden bg-nct-gold-tint">
+    <div className="relative grid min-h-screen grid-rows-[64px_auto_1fr] overflow-hidden bg-nct-gold-tint">
       {/* Decorative paint-splash backdrop — purely visual, sits behind all
           interactive content so it never intercepts clicks or gets exported. */}
       <div
@@ -128,7 +129,14 @@ export default function Home() {
         }}
       />
 
-      <TopBar prompt={prompt} secondsLeft={secondsLeft} onNewRound={newRound} />
+      <TopBar onNewRound={newRound} />
+
+      <RoundStatusBar
+        prompt={prompt}
+        secondsLeft={secondsLeft}
+        totalSeconds={ROUND_SECONDS}
+        isRunning={isRunning}
+      />
 
       <div className="relative z-10 grid grid-cols-1 gap-4 p-4 sm:grid-cols-[72px_1fr_320px]">
         <Sidebar
