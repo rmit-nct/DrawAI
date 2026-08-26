@@ -13,8 +13,31 @@ import { getRandomPrompt, labelMatchesPrompt } from "@/lib/prompts";
 import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from "@/lib/canvas/drawing";
 import type { AIGuessResponse, AIMode, InputMode, Point, RoundResult } from "@/types";
 
-const ROUND_SECONDS = 60;
-const LIVE_GUESS_DEBOUNCE_MS = 1400;
+// 30s, not 60s. Commit 346282a was titled "Reduce Guessing time to 30s" but
+// only renamed .env.example -> .env; the timer itself was never changed.
+const ROUND_SECONDS = 30;
+
+/* --------------------------------------------------------------------------
+ * Live-guess budget
+ *
+ * The free Gemini tier allows 15 requests/minute and 1,000/day, shared by the
+ * whole project — not per player. Live guessing used to fire 1.4s after every
+ * single stroke, which is 15-25 calls in one 60s round: enough to blow the
+ * per-minute limit on your own, and to burn the daily allowance in about ten
+ * rounds across the team.
+ *
+ * These four rules together bring a round down to ~6 live calls, which leaves
+ * room for roughly two and a half rounds per minute.
+ * ----------------------------------------------------------------------- */
+
+/** Wait this long after the last stroke before guessing. */
+const LIVE_GUESS_DEBOUNCE_MS = 2500;
+/** Never fire two live guesses closer together than this, however fast they draw. */
+const MIN_MS_BETWEEN_LIVE_GUESSES = 4000;
+/** A single extra stroke rarely changes what a drawing looks like. */
+const MIN_NEW_STROKES_PER_GUESS = 2;
+/** Hard ceiling per round, so one long round cannot drain the daily quota. */
+const MAX_LIVE_GUESSES_PER_ROUND = 6;
 
 export default function Home() {
   const canvasHandle = useRef<DrawingCanvasHandle>(null);
@@ -44,6 +67,12 @@ export default function Home() {
 
   const inFlight = useRef<AbortController | null>(null);
   const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Live-guess budget state. Refs, not state: these are read inside callbacks
+  // and a re-render on every stroke would be pure waste.
+  const strokeCountAtLastGuess = useRef(0);
+  const lastGuessAt = useRef(0);
+  const liveGuessesThisRound = useRef(0);
 
   // Keep the latest values reachable from callbacks without re-creating them.
   // Mirrored in effects, not during render.
@@ -83,9 +112,39 @@ export default function Home() {
 
   // ------------------------------------------------------------ AI guess ---
 
+  /**
+   * Should this live guess be allowed to fire?
+   *
+   * Only live guessing is metered. Pressing "Guess now" and the end-of-round
+   * scoring call both go straight to runGuess() and bypass this — the player
+   * asked for one, and the round has to be scored even if the budget is spent.
+   *
+   * Mock mode costs nothing, so it is not metered either.
+   *
+   * Returns null when the guess may proceed, or a short reason why it was
+   * skipped (handy if you want to log it while tuning the numbers).
+   */
+  const liveGuessBlockedReason = useCallback((strokeCount: number): string | null => {
+    if (aiModeRef.current !== "gemini") return null;
+    if (liveGuessesThisRound.current >= MAX_LIVE_GUESSES_PER_ROUND) return "round budget spent";
+    if (strokeCount - strokeCountAtLastGuess.current < MIN_NEW_STROKES_PER_GUESS) {
+      return "not enough new strokes";
+    }
+    if (Date.now() - lastGuessAt.current < MIN_MS_BETWEEN_LIVE_GUESSES) {
+      return "too soon after the last guess";
+    }
+    return null;
+  }, []);
+
   const runGuess = useCallback(async (): Promise<AIGuessResponse | null> => {
     const strokes = canvasHandle.current?.getStrokes() ?? [];
     if (strokes.length === 0) return null;
+
+    // Record what we are about to ask about, BEFORE awaiting. If we waited for
+    // the response instead, two quick strokes would both pass the gate while
+    // the first request was still open.
+    strokeCountAtLastGuess.current = strokes.length;
+    lastGuessAt.current = Date.now();
 
     inFlight.current?.abort();
     const controller = new AbortController();
@@ -120,6 +179,19 @@ export default function Home() {
 
   const finishRound = useCallback(async () => {
     const currentPrompt = promptRef.current;
+
+    // Show the card the instant the clock stops. The scoring call below can
+    // take a few seconds, and waiting for it before rendering anything made a
+    // slow response look like a frozen game.
+    setRoundResult({
+      prompt: currentPrompt ?? "",
+      guessed: false,
+      matchedLabel: null,
+      pointsAwarded: 0,
+      reason: "time-up",
+      pending: true,
+    });
+
     const result = await runGuess();
 
     const match =
@@ -159,6 +231,11 @@ export default function Home() {
     setStrokeCount(0);
     setCanRedo(false);
     setRound((r) => r + 1);
+
+    // Fresh budget for the new round.
+    strokeCountAtLastGuess.current = 0;
+    lastGuessAt.current = 0;
+    liveGuessesThisRound.current = 0;
     restart(ROUND_SECONDS);
   }, [restart]);
 
@@ -176,11 +253,19 @@ export default function Home() {
 
       if (!liveGuessing || count === 0 || roundResult) return;
       if (liveTimer.current) clearTimeout(liveTimer.current);
-      // Debounced: fires once the player pauses, not on every stroke, so live
-      // mode doesn't hammer the Gemini endpoint.
-      liveTimer.current = setTimeout(() => void runGuess(), LIVE_GUESS_DEBOUNCE_MS);
+
+      // Debounce first, then check the budget when the timer actually fires —
+      // not now. Between arming and firing the player may have drawn more, or
+      // another guess may have gone out, so a decision made here would be
+      // 2.5 seconds stale by the time it mattered.
+      liveTimer.current = setTimeout(() => {
+        const strokesNow = canvasHandle.current?.getStrokes().length ?? 0;
+        if (liveGuessBlockedReason(strokesNow) !== null) return;
+        liveGuessesThisRound.current += 1;
+        void runGuess();
+      }, LIVE_GUESS_DEBOUNCE_MS);
     },
-    [liveGuessing, roundResult, runGuess]
+    [liveGuessing, roundResult, runGuess, liveGuessBlockedReason]
   );
 
   useEffect(() => {

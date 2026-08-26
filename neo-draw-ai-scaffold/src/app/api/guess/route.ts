@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, SchemaType, type ResponseSchema } from "@google/generative-ai";
 import type { AIGuessResponse, AIGuessResult } from "@/types";
 
 /**
@@ -19,9 +19,47 @@ import type { AIGuessResponse, AIGuessResult } from "@/types";
  * threw and took the whole page down with it.
  */
 
-const MODEL_NAME = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-const REQUEST_TIMEOUT_MS = 20_000;
+// Flash-Lite, not Flash: a rough doodle needs speed, not deliberation, and the
+// lite tier has the more generous free quota.
+//
+// 3.5, not 2.5: as of Aug 2026 Google returns 404 for gemini-2.5-flash-lite on
+// newly-created API keys — "no longer available to new users" — and names
+// gemini-3.5-flash-lite as the replacement. Existing keys still work, which is
+// why the docs still list 2.5 as active.
+const MODEL_NAME = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+// 8s, not 20s. A round is 60s long, and finishRound() waits for this call
+// before it can score, so a 20s deadline could leave the end-of-round card
+// hanging a third of a round after the clock hit zero.
+const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024; // ~6MB of base64; a canvas PNG is far smaller
+
+/**
+ * The exact shape we want back. Handing this to the API as `responseSchema`
+ * makes the *service* enforce the structure, instead of us asking for JSON in
+ * the prompt and then repairing whatever actually turns up. That is what let us
+ * delete the old extractJson() fence-stripper below.
+ *
+ * Note this guarantees TYPES, not VALUES: the model can still answer
+ * `confidence: 85` when we wanted 0.85, or return eight guesses. Clamping that
+ * is still normalizeGuesses()' job.
+ */
+const GUESS_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    guesses: {
+      type: SchemaType.ARRAY,
+      items: {
+        type: SchemaType.OBJECT,
+        properties: {
+          label: { type: SchemaType.STRING, description: "A single common noun, e.g. \"cat\"." },
+          confidence: { type: SchemaType.NUMBER, description: "Between 0 and 1." },
+        },
+        required: ["label", "confidence"],
+      },
+    },
+  },
+  required: ["guesses"],
+};
 
 export async function GET() {
   return NextResponse.json({
@@ -35,20 +73,26 @@ function fail(error: string, status: number) {
   return NextResponse.json(body, { status });
 }
 
-/** Pull the JSON object out of a response that may be wrapped in prose or fences. */
-function extractJson(text: string): unknown {
-  const cleaned = text.replace(/```json/gi, "").replace(/```/g, "").trim();
+/**
+ * Last resort when the SDK hands us no numeric status: recover one from the
+ * message text. Anchored to a bracketed "[404 " so that a number living inside
+ * a URL, a model name or a token count can never be read as a status code.
+ */
+function statusFromMessage(message: string): number | null {
+  const m = message.match(/\[(\d{3})\s/);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * With GUESS_SCHEMA in place the body is already valid JSON, so this is only a
+ * guard for the cases the schema cannot cover — a proxy error page, a dropped
+ * connection, an SDK-level failure that hands us HTML.
+ */
+function parseJson(text: string): unknown {
   try {
-    return JSON.parse(cleaned);
+    return JSON.parse(text);
   } catch {
-    const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-    if (start === -1 || end <= start) return null;
-    try {
-      return JSON.parse(cleaned.slice(start, end + 1));
-    } catch {
-      return null;
-    }
+    return null;
   }
 }
 
@@ -101,7 +145,12 @@ export async function POST(req: NextRequest) {
     return fail("Drawing image is too large.", 413);
   }
 
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  // Two things can cut this call short: our own deadline, or the player
+  // starting another guess (live guessing aborts the previous fetch on every
+  // new stroke). Before, only the deadline was wired up — so an abandoned
+  // request kept running here, still billed tokens, and still burned one of the
+  // 15 requests/minute the free tier allows.
+  const signal = AbortSignal.any([req.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
@@ -133,12 +182,16 @@ export async function POST(req: NextRequest) {
             ],
           },
         ],
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: "application/json",
+          responseSchema: GUESS_SCHEMA,
+        },
       },
-      { signal: timeout }
+      { signal }
     );
 
-    const guesses = normalizeGuesses(extractJson(result.response.text() ?? ""));
+    const guesses = normalizeGuesses(parseJson(result.response.text() ?? ""));
 
     if (guesses.length === 0) {
       const body: AIGuessResponse = {
@@ -152,18 +205,53 @@ export async function POST(req: NextRequest) {
     const body: AIGuessResponse = { guesses, isMock: false };
     return NextResponse.json(body);
   } catch (err) {
+    // The player already moved on and nothing is listening for this response.
+    // Not an error, and definitely not a timeout — return quietly.
+    if (req.signal.aborted) {
+      return fail("Guess cancelled by a newer request.", 499);
+    }
+
     console.error("Gemini guess error:", err);
 
     const message = err instanceof Error ? err.message : String(err);
+
     if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
       return fail("The AI took too long to respond. Try again.", 504);
     }
-    if (/api[_ ]?key|permission|unauthenticated|401|403/i.test(message)) {
+
+    /*
+     * Classify on the HTTP status the SDK attaches, NOT on words in the message.
+     *
+     * The previous version tested the message against /quota|rate|429|.../ — and
+     * EVERY SDK error message embeds the request URL, which ends in
+     * ".../models/<name>:generateContent". "gene(rate)Content" contains the
+     * substring "rate", so a 404 "model not found" reported itself to the player
+     * as "quota or rate limit reached". We spent a debugging session chasing a
+     * quota problem that never existed.
+     */
+    const status =
+      typeof (err as { status?: unknown })?.status === "number"
+        ? (err as { status: number }).status
+        : statusFromMessage(message);
+
+    if (status === 404) {
+      return fail(
+        `Gemini has no model named "${MODEL_NAME}" available to this API key. ` +
+          `Set GEMINI_MODEL in .env.local to one your key can use — ` +
+          `run "node scripts/list-models.mjs" to print the list.`,
+        502
+      );
+    }
+    if (status === 401 || status === 403 || (status === 400 && /api[_ ]?key/i.test(message))) {
       return fail("Gemini rejected the API key. Check GEMINI_API_KEY in .env.local.", 502);
     }
-    if (/quota|rate|429|resource[_ ]?exhausted/i.test(message)) {
+    if (status === 429) {
       return fail("Gemini quota or rate limit reached. Try again shortly, or use Mock mode.", 429);
     }
+    if (status === 500 || status === 503) {
+      return fail("Gemini is temporarily unavailable. Try again in a moment.", 502);
+    }
+
     return fail(`AI guess failed: ${message}`, 502);
   }
 }

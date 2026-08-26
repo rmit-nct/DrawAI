@@ -44,6 +44,13 @@ export interface RoundResult {
   matchedLabel: string | null;
   pointsAwarded: number;
   reason: "time-up" | "guessed";
+  /**
+   * True while the final guess is still in flight. The overlay used to wait for
+   * the AI before appearing at all, so a slow call looked like the game had
+   * frozen. Now the card shows immediately in a pending state and the verdict
+   * fills in underneath.
+   */
+  pending?: boolean;
 }
 
 // Hand landmark subset we care about (wrist + index fingertip)

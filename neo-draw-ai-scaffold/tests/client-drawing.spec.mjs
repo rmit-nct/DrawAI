@@ -7,8 +7,12 @@ function log(name, pass, detail = '') {
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ' :: ' + detail : ''}`);
 }
 
+// No executablePath: let Playwright resolve its own bundled Chromium, so this
+// runs on Windows and macOS too. The old hard-coded /opt/pw-browsers/... path
+// only ever worked on one Linux machine.
+// Override with CHROME_PATH=... if you want a specific local browser.
 const browser = await chromium.launch({
-  executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+  ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
   args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
 });
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 940 } });

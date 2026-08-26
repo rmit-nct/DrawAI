@@ -1,6 +1,14 @@
 node_modules/
 .next/
-.env.local
-.env*.local
 *.log
 .DS_Store
+
+# Secrets. .env.example is the blank template and IS committed —
+# the README setup step is `cp .env.example .env.local`.
+.env
+.env.local
+.env*.local
+.env.local.*
+
+node_modules/
+.next/
