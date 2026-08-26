@@ -1,26 +1,159 @@
 @import "tailwindcss";
 
+/* ============================================================================
+   NEO DrawAI — Neo Culture Tech (NCT) visual identity
+   ----------------------------------------------------------------------------
+   Palette sampled directly from the NCT logo in the project brief:
+     navy   #1F2844  — the two outer slabs of the "N"
+     steel  #5095AA  — the tall centre slab, and the word "TECH"
+     amber  #F8B73A  — the offset highlight behind every slab
+   Navy carries the surfaces, steel carries structure and information,
+   amber is reserved for the single most important thing on screen
+   (the active action, the running timer, the prompt word).
+   ========================================================================== */
+
+@theme {
+  /* Brand */
+  --color-nct-navy: #1f2844;
+  --color-nct-steel: #5095aa;
+  --color-nct-amber: #f8b73a;
+
+  /* Navy ramp for surfaces */
+  --color-nct-900: #0b1120;
+  --color-nct-850: #101a2e;
+  --color-nct-800: #16223a;
+  --color-nct-700: #1f2844;
+  --color-nct-600: #2b3757;
+  --color-nct-500: #3d4c72;
+
+  /* Steel ramp for text and structure */
+  --color-nct-steel-light: #7fb6c7;
+  --color-nct-steel-dark: #3d7288;
+
+  /* Amber ramp */
+  --color-nct-amber-light: #ffd177;
+  --color-nct-amber-dark: #d99b22;
+
+  /* Semantic */
+  --color-nct-ink: #eaf2f7;
+  --color-nct-muted: #9fb3c8;
+  --color-nct-success: #4ec9a5;
+  --color-nct-danger: #e5645f;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "Cascadia Mono",
+    Menlo, Consolas, monospace;
+
+  --radius-nct: 0.875rem;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  --background: var(--color-nct-900);
+  --foreground: var(--color-nct-ink);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--background);
 }
 
 body {
-  background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  /* Angled amber/steel light sources echoing the diagonal slabs of the logo. */
+  background-color: var(--color-nct-900);
+  background-image:
+    radial-gradient(105rem 55rem at 12% -20%, rgba(80, 149, 170, 0.22), transparent 60%),
+    radial-gradient(80rem 45rem at 108% 8%, rgba(248, 183, 58, 0.16), transparent 58%),
+    radial-gradient(70rem 60rem at 50% 120%, rgba(31, 40, 68, 0.85), transparent 70%);
+  background-attachment: fixed;
+  min-height: 100dvh;
+}
+
+/* Faint diagonal grid — "tech" texture without competing with the canvas. */
+.nct-grid::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgba(80, 149, 170, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(80, 149, 170, 0.07) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(120rem 80rem at 50% 0%, #000 30%, transparent 78%);
+}
+
+/* --- Reusable brand pieces ------------------------------------------------ */
+
+.nct-panel {
+  background: color-mix(in oklab, var(--color-nct-800) 88%, transparent);
+  border: 1px solid color-mix(in oklab, var(--color-nct-steel) 26%, transparent);
+  border-radius: var(--radius-nct);
+  box-shadow:
+    0 1px 0 0 color-mix(in oklab, var(--color-nct-steel) 14%, transparent) inset,
+    0 18px 40px -24px rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(6px);
+}
+
+/* The logo's signature amber offset, applied to UI blocks. */
+.nct-offset {
+  position: relative;
+}
+.nct-offset::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  translate: 6px 6px;
+  background: var(--color-nct-amber);
+  z-index: -1;
+  opacity: 0.9;
+}
+
+.nct-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-nct-steel-light);
+}
+
+/* Focus ring in brand amber, visible on every interactive element. */
+.nct-focus:focus-visible {
+  outline: 2px solid var(--color-nct-amber);
+  outline-offset: 2px;
+}
+
+@keyframes nct-pulse-amber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 183, 58, 0.55); }
+  50% { box-shadow: 0 0 0 10px rgba(248, 183, 58, 0); }
+}
+.nct-pulse {
+  animation: nct-pulse-amber 1.4s ease-out infinite;
+}
+
+@keyframes nct-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.nct-rise {
+  animation: nct-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nct-pulse,
+  .nct-rise {
+    animation: none;
+  }
+}
+
+/* Never let the drawing surface scroll-bounce or select text under a stroke. */
+.nct-canvas {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: crosshair;
 }
