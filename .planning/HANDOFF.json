@@ -1,0 +1,66 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-08-27T18:48:48.048Z",
+  "context": "default",
+  "note": "No GSD .planning/ structure existed in this repo before this handoff (no phases/spikes/sketches/deliberations). This is an ad-hoc conversational session, not a GSD-managed phase — fields below are adapted accordingly (no real phase/plan/task numbers).",
+  "phase": null,
+  "phase_name": "NEO DrawAI UI redesign (branch feature/UI-design)",
+  "phase_dir": null,
+  "plan": null,
+  "task": null,
+  "total_tasks": null,
+  "status": "paused",
+  "repo": "D:\\CODING RELATED\\PROJECT FILES\\DrawAI",
+  "app_dir": "neo-draw-ai-scaffold",
+  "branch": "feature/UI-design",
+  "completed_tasks": [
+    { "id": 1, "name": "Reset feature/UI-design to match Testing branch (chose wholesale reset over resolving 9-file merge conflict)", "status": "done" },
+    { "id": 2, "name": "Ran /init, wrote neo-draw-ai-scaffold/CLAUDE.md documenting architecture", "status": "done" },
+    { "id": 3, "name": "Redesign: moved Toolbar (input/colour/brush/undo-redo-clear) into the side rail with Phosphor icons", "status": "done" },
+    { "id": 4, "name": "Redesign: replaced AIGuessPanel (3-guess list + % bars) with GuessReveal — single top guess in Permanent Marker font, centred below canvas", "status": "done" },
+    { "id": 5, "name": "Redesign: consolidated RoundHeader's duplicate timer (digits + separate progress bar) into one SVG ring widget", "status": "done" },
+    { "id": 6, "name": "Removed confidence percentage from GuessReveal; updated Playwright test T12 to use a new data-testid instead of scraping for '%'", "status": "done" },
+    { "id": 7, "name": "Fixed a real overflow bug: single-word guess could overflow its box at in-between window widths (fixed via clamp()-based fluid font-size + break-words, replacing fixed text-4xl/sm:text-5xl inside a hard max-w-md)", "status": "done" },
+    { "id": 8, "name": "Relocated webcam pinch-instruction text to under the camera panel; removed the mouse/touch instructional line entirely", "status": "done" },
+    { "id": 9, "name": "Fixed mobile-first DOM order: tools rail is now genuinely first in the DOM (correct on mobile with no override), reflows to the right rail only via lg:order-2 at desktop — replaces an earlier order-first/lg:order-none hack that mismatched visual vs. keyboard tab order", "status": "done" },
+    { "id": 10, "name": "Installed plugins: superpowers, frontend-design, context-mode (+marketplace), claude-mem (+marketplace)", "status": "done" }
+  ],
+  "remaining_tasks": [
+    { "id": 11, "name": "Review the full working-tree diff on feature/UI-design", "status": "not_started" },
+    { "id": 12, "name": "Decide whether/when to commit the redesign work (nothing from tasks 1-9 has been committed yet — see uncommitted_files)", "status": "not_started" },
+    { "id": 13, "name": "Decide whether to force-push feature/UI-design to origin (local branch was reset to Testing's content, so it now diverges from origin/feature/UI-design — 7 vs 3 commits; force-push would overwrite the remote's 3 original UI-design commits, which stay recoverable via origin/feature/UI-design / reflog either way)", "status": "not_started" },
+    { "id": 14, "name": "Optional: decide whether to trim the shorter in-panel webcam caption now that the fuller pinch instruction sits directly below the camera panel (flagged, not acted on)", "status": "not_started" }
+  ],
+  "blockers": [],
+  "human_actions_pending": [
+    { "action": "Review + commit the redesign work when ready", "context": "All requested changes are done and verified, but nothing has been committed per this session's policy of only committing when asked", "blocking": false },
+    { "action": "Decide on force-pushing feature/UI-design", "context": "Local branch was hard-reset to Testing's commit; origin/feature/UI-design still has the original 3 UI-design commits untouched", "blocking": false }
+  ],
+  "decisions": [
+    { "decision": "Reset feature/UI-design to match Testing wholesale instead of resolving a 9-file merge conflict", "rationale": "User explicitly chose this over conflict-by-conflict resolution or aborting; UI-design's own commits remain recoverable via origin/feature/UI-design and reflog" },
+    { "decision": "AI engine controls (mode switch, live toggle, Guess now) moved down with the guess reveal, not into the tools rail", "rationale": "User's phrasing treated 'AI Guess' as the whole feature (controls + result) moving below the canvas, while the repurposed side panel became 100% drawing tools" },
+    { "decision": "Kept a small confidence percentage under the single guess word initially, then removed it entirely on explicit follow-up request", "rationale": "First kept it because Playwright test T12 asserted on a '%' string; when asked to remove it, updated T12 to target a new data-testid instead of relaxing the check" },
+    { "decision": "Fixed guess-word overflow with clamp()-based responsive font-size instead of just adding a media-query breakpoint", "rationale": "The root cause was a single unbreakable word overflowing a fixed-breakpoint font size inside a hard max-w-md box with no scrollbar warning — clamp() scales continuously so there's no in-between width where it breaks again" },
+    { "decision": "Restructured DOM order to be mobile-first (tools column first, lg:order-2 reflow) rather than desktop-first with a mobile order-first override", "rationale": "Found via a ui-ux-pro-max skill-driven audit: the previous order-first/lg:order-none approach is the documented anti-pattern ('desktop-first causing mobile issues') and created a keyboard-tab-order vs. visual-order mismatch on mobile" },
+    { "decision": "Declined to run 'npx get-shit-done-cc --claude --global' myself", "rationale": "Executing an arbitrary third-party npm package with global scope falls outside the sanctioned plugin-marketplace install mechanism; told the user to run it themselves if wanted (they apparently did — GSD skills are now active)" }
+  ],
+  "uncommitted_files": [
+    "neo-draw-ai-scaffold/next-env.d.ts (modified, likely just Next.js regen)",
+    "neo-draw-ai-scaffold/package-lock.json (modified — @phosphor-icons/react + playwright devDep added)",
+    "neo-draw-ai-scaffold/package.json (modified — same)",
+    "neo-draw-ai-scaffold/src/app/globals.css (modified — --font-marker token)",
+    "neo-draw-ai-scaffold/src/app/layout.tsx (modified — Permanent_Marker font via next/font/google)",
+    "neo-draw-ai-scaffold/src/app/page.tsx (modified — layout restructure)",
+    "neo-draw-ai-scaffold/src/components/ai/AIGuessPanel.tsx (deleted)",
+    "neo-draw-ai-scaffold/src/components/ai/GuessReveal.tsx (new)",
+    "neo-draw-ai-scaffold/src/components/ui/RoundHeader.tsx (modified — ring timer)",
+    "neo-draw-ai-scaffold/src/components/ui/Toolbar.tsx (modified — vertical rail + icons)",
+    "neo-draw-ai-scaffold/tests/client-drawing.spec.mjs (modified — T12 now uses data-testid)",
+    "neo-draw-ai-scaffold/CLAUDE.md (new, untracked)"
+  ],
+  "background_processes": [
+    { "process": "next dev", "port": 3000, "note": "Was already running before this session started (not started or stopped by the assistant); used throughout for verification via the Playwright regression script and manual screenshots" }
+  ],
+  "next_action": "Read neo-draw-ai-scaffold/CLAUDE.md for the current architecture, then `git status`/`git diff` on feature/UI-design to review everything in uncommitted_files before deciding whether to commit and/or force-push",
+  "context_notes": "Every requested change this session was implemented, verified (npm run lint + npm run build + the project's own Playwright regression script at tests/client-drawing.spec.mjs, currently 33/35 passing — the 2 failures are pre-existing, unrelated to this work, about webcam hand-tracking model-load error messaging in this sandbox's network conditions) and screenshotted. Nothing is mid-flight or half-done. The only open thread is the git housekeeping in remaining_tasks."
+}
