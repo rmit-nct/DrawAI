@@ -174,6 +174,20 @@ log('T12b mock output is labelled as mock', /mock/i.test(bodyText), '');
 const promptText = await page.locator('main, header').first().innerText();
 log('T13 a drawing prompt is displayed', !/YOUR WORD\s*…/i.test(promptText), (promptText.match(/YOUR WORD\s*\n?\s*\w+/i) || [''])[0].replace(/\n/g, ' '));
 
+// ---------- T23: score has an accessible status region ----------
+// The mock guesser is non-deterministic (confidence grows with stroke
+// count, wrong guesses drawn from CONFUSION_SETS), so this script can't
+// reliably force a scoring round — instead this checks the a11y plumbing
+// and number formatting are correct for whatever the score currently is
+// (0, since no round has scored yet in this run), and that the visible
+// digit settles to the real value rather than getting stuck mid-animation.
+const scoreStatus = page.getByRole('status', { name: /^score/i });
+const scoreStatusText = await scoreStatus.innerText().catch(() => '');
+log('T23 score has an accessible status region', /score\s+0/i.test(scoreStatusText), scoreStatusText);
+await page.waitForTimeout(700); // past the ~600ms count-up duration
+const scoreDigits = (await page.locator('[data-testid="score-value"]').innerText().catch(() => '')).trim();
+log('T23b displayed score settles to the real value', scoreDigits === '0', scoreDigits);
+
 // ---------- T14: API failure must NOT crash the UI (old crash bug) ----------
 const errCountBefore = pageErrors.length;
 await page.route('**/api/guess', (route) =>
