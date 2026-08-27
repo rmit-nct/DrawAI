@@ -44,6 +44,8 @@
     "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "Cascadia Mono",
     Menlo, Consolas, monospace;
+  /* Felt-tip accent — used only for the single AI-guess word (GuessReveal). */
+  --font-marker: var(--font-permanent-marker), cursive;
 
   --radius-nct: 0.875rem;
 }

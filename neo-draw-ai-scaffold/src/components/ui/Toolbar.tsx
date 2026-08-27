@@ -1,5 +1,14 @@
 "use client";
 
+import {
+  ArrowClockwise,
+  ArrowCounterClockwise,
+  HandTap,
+  Mouse,
+  Trash,
+  VideoCamera,
+  type Icon,
+} from "@phosphor-icons/react";
 import type { InputMode } from "@/types";
 
 export const BRUSH_COLORS = [
@@ -17,10 +26,15 @@ export const BRUSH_SIZES = [
   { label: "Marker", value: 22 },
 ] as const;
 
-const INPUT_MODES: Array<{ mode: InputMode; label: string; hint: string }> = [
-  { mode: "mouse", label: "Mouse", hint: "Draw by clicking and dragging" },
-  { mode: "touch", label: "Touch", hint: "Draw with your finger or a stylus" },
-  { mode: "webcam", label: "Webcam", hint: "Pinch your thumb and index finger to draw in the air" },
+const INPUT_MODES: Array<{ mode: InputMode; label: string; hint: string; icon: Icon }> = [
+  { mode: "mouse", label: "Mouse", hint: "Draw by clicking and dragging", icon: Mouse },
+  { mode: "touch", label: "Touch", hint: "Draw with your finger or a stylus", icon: HandTap },
+  {
+    mode: "webcam",
+    label: "Webcam",
+    hint: "Pinch your thumb and index finger to draw in the air",
+    icon: VideoCamera,
+  },
 ];
 
 interface ToolbarProps {
@@ -39,7 +53,7 @@ interface ToolbarProps {
 }
 
 const baseButton =
-  "nct-focus rounded-lg px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-35";
+  "nct-focus flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-35";
 
 export function Toolbar({
   inputMode,
@@ -56,7 +70,9 @@ export function Toolbar({
   disabled = false,
 }: ToolbarProps) {
   return (
-    <div className="nct-panel flex w-full flex-wrap items-center gap-x-4 gap-y-3 px-3 py-3 sm:gap-x-6 sm:px-4">
+    <aside aria-label="Drawing tools" className="nct-panel flex w-full flex-col gap-5 p-4 lg:w-80 lg:shrink-0">
+      <h2 className="nct-label">Tools</h2>
+
       {/* Input mode */}
       <div className="flex flex-col gap-1.5">
         <span className="nct-label">Input</span>
@@ -65,19 +81,20 @@ export function Toolbar({
           aria-label="Input mode"
           className="flex gap-1 rounded-xl bg-nct-900/60 p-1"
         >
-          {INPUT_MODES.map(({ mode, label, hint }) => (
+          {INPUT_MODES.map(({ mode, label, hint, icon: Icon }) => (
             <button
               key={mode}
               role="radio"
               aria-checked={inputMode === mode}
               title={hint}
               onClick={() => onInputModeChange(mode)}
-              className={`${baseButton} ${
+              className={`${baseButton} flex-1 ${
                 inputMode === mode
                   ? "bg-nct-amber text-nct-900 shadow-[0_2px_12px_-2px_rgba(248,183,58,0.7)]"
                   : "text-nct-muted hover:bg-nct-700/70 hover:text-nct-ink"
               }`}
             >
+              <Icon size={16} weight="bold" aria-hidden="true" />
               {label}
             </button>
           ))}
@@ -95,7 +112,7 @@ export function Toolbar({
               aria-label={c.name}
               aria-pressed={color === c.value}
               title={c.name}
-              className={`nct-focus h-6 w-6 rounded-full border-2 transition sm:h-7 sm:w-7 ${
+              className={`nct-focus h-7 w-7 rounded-full border-2 transition ${
                 color === c.value
                   ? "scale-110 border-nct-ink"
                   : "border-nct-600 hover:scale-105 hover:border-nct-steel"
@@ -116,10 +133,8 @@ export function Toolbar({
               onClick={() => onLineWidthChange(s.value)}
               aria-pressed={lineWidth === s.value}
               title={`${s.label} (${s.value}px)`}
-              className={`nct-focus grid h-7 w-8 place-items-center rounded-lg transition sm:h-8 sm:w-9 ${
-                lineWidth === s.value
-                  ? "bg-nct-steel/30 ring-1 ring-nct-steel"
-                  : "hover:bg-nct-700/70"
+              className={`nct-focus grid h-9 flex-1 place-items-center rounded-lg transition ${
+                lineWidth === s.value ? "bg-nct-steel/30 ring-1 ring-nct-steel" : "hover:bg-nct-700/70"
               }`}
             >
               <span
@@ -136,32 +151,35 @@ export function Toolbar({
       </div>
 
       {/* Actions */}
-      <div className="flex flex-col gap-1.5 sm:ml-auto">
+      <div className="flex flex-col gap-1.5">
         <span className="nct-label">Canvas</span>
         <div className="flex gap-2">
           <button
             onClick={onUndo}
             disabled={disabled || !canUndo}
-            className={`${baseButton} bg-nct-700 text-nct-ink hover:bg-nct-600`}
+            className={`${baseButton} flex-1 bg-nct-700 text-nct-ink hover:bg-nct-600`}
           >
+            <ArrowCounterClockwise size={16} weight="bold" aria-hidden="true" />
             Undo
           </button>
           <button
             onClick={onRedo}
             disabled={disabled || !canRedo}
-            className={`${baseButton} bg-nct-700 text-nct-ink hover:bg-nct-600`}
+            className={`${baseButton} flex-1 bg-nct-700 text-nct-ink hover:bg-nct-600`}
           >
+            <ArrowClockwise size={16} weight="bold" aria-hidden="true" />
             Redo
           </button>
-          <button
-            onClick={onClear}
-            disabled={disabled || !canUndo}
-            className={`${baseButton} border border-nct-danger/50 bg-nct-danger/15 text-nct-danger hover:bg-nct-danger/25`}
-          >
-            Clear
-          </button>
         </div>
+        <button
+          onClick={onClear}
+          disabled={disabled || !canUndo}
+          className={`${baseButton} w-full border border-nct-danger/50 bg-nct-danger/15 text-nct-danger hover:bg-nct-danger/25`}
+        >
+          <Trash size={16} weight="bold" aria-hidden="true" />
+          Clear
+        </button>
       </div>
-    </div>
+    </aside>
   );
 }

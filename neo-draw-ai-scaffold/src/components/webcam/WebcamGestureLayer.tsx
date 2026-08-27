@@ -150,15 +150,6 @@ export function WebcamGestureLayer({
             )}
           </div>
         )}
-
-        {status === "ready" && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-nct-900 to-transparent px-3 pb-2 pt-6">
-            <p className="text-[0.7rem] leading-snug text-nct-ink/90">
-              <span className="font-bold text-nct-amber">Pinch</span> thumb + index to put the pen
-              down. Release to lift.
-            </p>
-          </div>
-        )}
       </div>
     </section>
   );

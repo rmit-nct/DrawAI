@@ -1,5 +1,13 @@
 import type { Metadata, Viewport } from "next";
+import { Permanent_Marker } from "next/font/google";
 import "./globals.css";
+
+const permanentMarker = Permanent_Marker({
+  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-permanent-marker",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "NEO DrawAI — Neo Culture Tech",
@@ -19,7 +27,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="en" className={`${permanentMarker.variable} h-full antialiased`}>
       <body className="nct-grid flex min-h-full flex-col">{children}</body>
     </html>
   );

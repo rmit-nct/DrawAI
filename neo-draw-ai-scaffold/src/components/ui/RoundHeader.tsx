@@ -18,6 +18,9 @@ function formatTime(seconds: number) {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+const RING_RADIUS = 27;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
 export function RoundHeader({
   prompt,
   secondsLeft,
@@ -71,14 +74,34 @@ export function RoundHeader({
             <div className="font-mono text-lg font-bold tabular-nums text-nct-ink">{round}</div>
           </div>
 
-          <div
-            className={`nct-panel min-w-[6.5rem] px-4 py-2 text-center ${
-              urgent ? "border-nct-danger/60" : ""
-            }`}
-          >
-            <div className="nct-label">Time</div>
+          <div className="relative grid h-16 w-16 shrink-0 place-items-center" title="Time left">
+            <svg viewBox="0 0 64 64" className="absolute inset-0 -rotate-90" aria-hidden="true">
+              <circle
+                cx="32"
+                cy="32"
+                r={RING_RADIUS}
+                fill="none"
+                strokeWidth="5"
+                stroke="currentColor"
+                className="text-nct-steel/20"
+              />
+              <circle
+                cx="32"
+                cy="32"
+                r={RING_RADIUS}
+                fill="none"
+                strokeWidth="5"
+                strokeLinecap="round"
+                stroke="currentColor"
+                strokeDasharray={RING_CIRCUMFERENCE}
+                strokeDashoffset={RING_CIRCUMFERENCE * (1 - pct / 100)}
+                className={`transition-[stroke-dashoffset] duration-300 ease-linear ${
+                  urgent ? "text-nct-danger" : "text-nct-amber"
+                }`}
+              />
+            </svg>
             <div
-              className={`font-mono text-2xl font-black tabular-nums ${
+              className={`font-mono text-sm font-black tabular-nums ${
                 urgent ? "text-nct-danger" : isRoundOver ? "text-nct-muted" : "text-nct-ink"
               }`}
               role="timer"
@@ -95,16 +118,6 @@ export function RoundHeader({
             New round
           </button>
         </div>
-      </div>
-
-      {/* Time bar */}
-      <div className="h-1 w-full bg-nct-900/70">
-        <div
-          className={`h-full transition-[width] duration-300 ease-linear ${
-            urgent ? "bg-nct-danger" : "bg-nct-amber"
-          }`}
-          style={{ width: `${pct}%` }}
-        />
       </div>
     </header>
   );

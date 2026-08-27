@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DrawingCanvas, type DrawingCanvasHandle } from "@/components/canvas/DrawingCanvas";
 import { WebcamGestureLayer } from "@/components/webcam/WebcamGestureLayer";
-import { AIGuessPanel } from "@/components/ai/AIGuessPanel";
+import { GuessReveal } from "@/components/ai/GuessReveal";
 import { Toolbar, BRUSH_COLORS, BRUSH_SIZES } from "@/components/ui/Toolbar";
 import { RoundHeader } from "@/components/ui/RoundHeader";
 import { RoundOverlay } from "@/components/ui/RoundOverlay";
@@ -62,6 +62,7 @@ export default function Home() {
   const [aiMode, setAiMode] = useState<AIMode>("mock");
   const [geminiAvailable, setGeminiAvailable] = useState(false);
   const [liveGuessing, setLiveGuessing] = useState(true);
+  const [liveBudgetSpent, setLiveBudgetSpent] = useState(false);
 
   const [cursor, setCursor] = useState<(Point & { pinching: boolean }) | null>(null);
 
@@ -140,9 +141,6 @@ export default function Home() {
     const strokes = canvasHandle.current?.getStrokes() ?? [];
     if (strokes.length === 0) return null;
 
-    // Record what we are about to ask about, BEFORE awaiting. If we waited for
-    // the response instead, two quick strokes would both pass the gate while
-    // the first request was still open.
     strokeCountAtLastGuess.current = strokes.length;
     lastGuessAt.current = Date.now();
 
@@ -180,9 +178,6 @@ export default function Home() {
   const finishRound = useCallback(async () => {
     const currentPrompt = promptRef.current;
 
-    // Show the card the instant the clock stops. The scoring call below can
-    // take a few seconds, and waiting for it before rendering anything made a
-    // slow response look like a frozen game.
     setRoundResult({
       prompt: currentPrompt ?? "",
       guessed: false,
@@ -236,6 +231,7 @@ export default function Home() {
     strokeCountAtLastGuess.current = 0;
     lastGuessAt.current = 0;
     liveGuessesThisRound.current = 0;
+    setLiveBudgetSpent(false);
     restart(ROUND_SECONDS);
   }, [restart]);
 
@@ -262,6 +258,7 @@ export default function Home() {
         const strokesNow = canvasHandle.current?.getStrokes().length ?? 0;
         if (liveGuessBlockedReason(strokesNow) !== null) return;
         liveGuessesThisRound.current += 1;
+        if (liveGuessesThisRound.current >= MAX_LIVE_GUESSES_PER_ROUND) setLiveBudgetSpent(true);
         void runGuess();
       }, LIVE_GUESS_DEBOUNCE_MS);
     },
@@ -306,11 +303,7 @@ export default function Home() {
       />
 
       <main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:gap-6">
-        {/* Canvas column. The toolbar spans the column so it stays on one row;
-            the canvas is capped and centred beneath it, because a 4:3 surface
-            at full column width would otherwise grow taller than the space left
-            under the header and push the game below the fold. */}
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
+        <div className="flex w-full flex-col gap-4 lg:order-2 lg:w-80 lg:shrink-0">
           <Toolbar
             inputMode={inputMode}
             onInputModeChange={setInputMode}
@@ -326,9 +319,49 @@ export default function Home() {
             disabled={roundOver}
           />
 
+          {inputMode === "webcam" ? (
+            <>
+              <WebcamGestureLayer
+                enabled
+                canvasHandle={canvasHandle}
+                onCursorChange={setCursor}
+                paused={roundOver}
+              />
+              <p className="text-center text-xs leading-relaxed text-nct-muted">
+                Pinch your thumb and index finger together to put the pen down, and move your hand
+                to draw. Release to lift the pen.
+              </p>
+            </>
+          ) : (
+            <section className="nct-panel hidden p-4 lg:block">
+              <h2 className="nct-label !text-nct-steel-light">How to play</h2>
+              <ol className="mt-3 space-y-2.5 text-xs leading-relaxed text-nct-muted">
+                <li>
+                  <span className="font-bold text-nct-ink">1.</span> Draw the word at the top before
+                  the timer runs out.
+                </li>
+                <li>
+                  <span className="font-bold text-nct-ink">2.</span> The AI guesses as you go — get
+                  it as the top guess for the most points.
+                </li>
+                <li>
+                  <span className="font-bold text-nct-ink">3.</span> Switch to{" "}
+                  <button
+                    onClick={() => setInputMode("webcam")}
+                    className="nct-focus font-bold text-nct-amber underline underline-offset-2"
+                  >
+                    Webcam
+                  </button>{" "}
+                  to draw in the air with a pinch gesture.
+                </li>
+              </ol>
+            </section>
+          )}
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-4 lg:order-1">
           <div
             className="mx-auto flex w-full flex-col gap-3"
-            style={{ maxWidth: "min(100%, calc((100dvh - 21rem) * 4 / 3))" }}
+            style={{ maxWidth: "min(100%, calc((100dvh - 15rem) * 4 / 3))" }}
           >
             <DrawingCanvas
               ref={canvasHandle}
@@ -359,18 +392,9 @@ export default function Home() {
                 onKeepDrawing={keepDrawing}
               />
             </DrawingCanvas>
-
-            <p className="text-xs leading-relaxed text-nct-muted">
-              {inputMode === "webcam"
-                ? "Pinch your thumb and index finger together to put the pen down, and move your hand to draw. Release to lift the pen."
-                : "Click or tap and drag to draw. ⌘/Ctrl+Z undoes, ⇧⌘/Ctrl+Z redoes."}
-            </p>
           </div>
-        </div>
 
-        {/* Side column */}
-        <div className="flex w-full flex-col gap-4 lg:w-80 lg:shrink-0">
-          <AIGuessPanel
+          <GuessReveal
             result={aiResult}
             loading={aiLoading}
             mode={aiMode}
@@ -379,42 +403,10 @@ export default function Home() {
             prompt={prompt}
             liveGuessing={liveGuessing}
             onLiveGuessingChange={setLiveGuessing}
+            liveBudgetSpent={liveBudgetSpent && aiMode === "gemini"}
             onGuessNow={() => void runGuess()}
             canGuess={strokeCount > 0 && !roundOver}
           />
-
-          {inputMode === "webcam" ? (
-            <WebcamGestureLayer
-              enabled
-              canvasHandle={canvasHandle}
-              onCursorChange={setCursor}
-              paused={roundOver}
-            />
-          ) : (
-            <section className="nct-panel hidden p-4 lg:block">
-              <h2 className="nct-label !text-nct-steel-light">How to play</h2>
-              <ol className="mt-3 space-y-2.5 text-xs leading-relaxed text-nct-muted">
-                <li>
-                  <span className="font-bold text-nct-ink">1.</span> Draw the word at the top before
-                  the timer runs out.
-                </li>
-                <li>
-                  <span className="font-bold text-nct-ink">2.</span> The AI guesses as you go — get
-                  it as the top guess for the most points.
-                </li>
-                <li>
-                  <span className="font-bold text-nct-ink">3.</span> Switch to{" "}
-                  <button
-                    onClick={() => setInputMode("webcam")}
-                    className="nct-focus font-bold text-nct-amber underline underline-offset-2"
-                  >
-                    Webcam
-                  </button>{" "}
-                  to draw in the air with a pinch gesture.
-                </li>
-              </ol>
-            </section>
-          )}
         </div>
       </main>
 

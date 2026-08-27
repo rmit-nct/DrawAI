@@ -166,7 +166,8 @@ await stroke([[0.3, 0.3], [0.6, 0.5], [0.4, 0.7], [0.3, 0.3]]);
 await page.getByRole('button', { name: /guess now/i }).click();
 await page.waitForTimeout(2200);
 let bodyText = await page.locator('body').innerText();
-log('T12 AI guess returns predictions', /\d+%/.test(bodyText), (bodyText.match(/[A-Za-z ]+\n?\d+%/) || [''])[0].replace(/\n/g, ' '));
+const guessWord = (await page.locator('[data-testid="ai-guess-word"]').first().innerText().catch(() => '')).trim();
+log('T12 AI guess returns a prediction', guessWord.length > 0, guessWord);
 log('T12b mock output is labelled as mock', /mock/i.test(bodyText), '');
 
 // ---------- T13: prompt shown ----------
@@ -244,6 +245,7 @@ log('T17c camera preview stays live when the model fails', videoInfo.w > 0 && !v
 const modelErr = (bodyText.match(/Could not load[^\n]*/i) || [''])[0];
 log('T17d error names the model, not the camera', !/Failed to start webcam/i.test(bodyText) && /Could not load the hand-tracking model/i.test(bodyText), modelErr.slice(0, 90) || 'no model error');
 log('T17e a Retry affordance is offered', await page.getByRole('button', { name: /^retry$/i }).count() > 0, '');
+log('T17f in-panel duplicate pinch caption removed (kept only below the panel)', !/thumb \+ index/i.test(bodyText), '');
 await page.getByRole('radio', { name: /^mouse$/i }).first().click();
 await page.waitForTimeout(500);
 
