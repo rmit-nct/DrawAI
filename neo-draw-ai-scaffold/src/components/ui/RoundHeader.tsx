@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { NctMark } from "@/components/brand/NctLogo";
 
 interface RoundHeaderProps {
@@ -21,6 +22,52 @@ function formatTime(seconds: number) {
 const RING_RADIUS = 27;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
+/**
+ * Animates `value` from its previous value to the new one over `durationMs`
+ * (ease-out cubic), for the score count-up. Skips the animation entirely
+ * under prefers-reduced-motion — jumps straight to the final value, same
+ * policy as .nct-pulse/.nct-rise in globals.css.
+ */
+function useCountUp(value: number, durationMs = 600) {
+  const [display, setDisplay] = useState(value);
+  const fromRef = useRef(value);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const prefersReduced =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReduced || value === fromRef.current) {
+      fromRef.current = value;
+      setDisplay(value);
+      return;
+    }
+
+    const from = fromRef.current;
+    const delta = value - from;
+    const start = performance.now();
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(Math.round(from + delta * eased));
+      if (t < 1) {
+        rafRef.current = requestAnimationFrame(tick);
+      } else {
+        fromRef.current = value;
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [value, durationMs]);
+
+  return display;
+}
+
 export function RoundHeader({
   prompt,
   secondsLeft,
@@ -32,6 +79,7 @@ export function RoundHeader({
 }: RoundHeaderProps) {
   const pct = Math.max(0, Math.min(100, (secondsLeft / totalSeconds) * 100));
   const urgent = secondsLeft <= 10 && secondsLeft > 0 && !isRoundOver;
+  const displayedScore = useCountUp(score);
 
   return (
     <header className="relative z-10 w-full">
@@ -67,7 +115,21 @@ export function RoundHeader({
         <div className="ml-auto flex items-center gap-3">
           <div className="text-right">
             <div className="nct-label">Score</div>
-            <div className="font-mono text-lg font-bold tabular-nums text-nct-ink">{score}</div>
+            <div
+              className="font-mono text-lg font-bold tabular-nums text-nct-ink"
+              role="status"
+              aria-atomic="true"
+            >
+              <span aria-hidden="true" data-testid="score-value">
+                {displayedScore.toLocaleString()}
+              </span>
+              {/* Announces only the settled value, not every animated
+                  intermediate frame — a live region re-rendered 60x/sec
+                  would be far worse than the static number it replaces. */}
+              <span className="sr-only" aria-live="polite">
+                Score {score.toLocaleString()}
+              </span>
+            </div>
           </div>
           <div className="text-right">
             <div className="nct-label">Round</div>
