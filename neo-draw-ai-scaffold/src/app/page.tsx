@@ -7,6 +7,7 @@ import { GuessReveal } from "@/components/ai/GuessReveal";
 import { Toolbar, BRUSH_COLORS, BRUSH_SIZES } from "@/components/ui/Toolbar";
 import { RoundHeader } from "@/components/ui/RoundHeader";
 import { RoundOverlay } from "@/components/ui/RoundOverlay";
+import { RoundTransitionWipe } from "@/components/ui/RoundTransitionWipe";
 import { useCountdownTimer } from "@/hooks/useCountdownTimer";
 import { fetchAICapability, requestGuess } from "@/lib/ai/guessService";
 import { getRandomPrompt, labelMatchesPrompt } from "@/lib/prompts";
@@ -385,6 +386,8 @@ export default function Home() {
                 }}
               />
             )}
+
+              <RoundTransitionWipe key={round} />
 
               <RoundOverlay
                 result={roundResult}

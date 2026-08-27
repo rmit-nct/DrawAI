@@ -115,6 +115,15 @@ body {
   opacity: 0.9;
 }
 
+.nct-scoreboard {
+  background: color-mix(in oklab, var(--color-nct-900) 92%, transparent);
+  border: 1px solid color-mix(in oklab, var(--color-nct-steel) 35%, transparent);
+  border-radius: 0.625rem;
+  box-shadow:
+    0 1px 0 0 color-mix(in oklab, var(--color-nct-steel) 10%, transparent) inset,
+    0 2px 8px -4px rgba(0, 0, 0, 0.8) inset;
+}
+
 .nct-label {
   font-size: 0.6875rem;
   font-weight: 700;
@@ -145,9 +154,34 @@ body {
   animation: nct-rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+@keyframes nct-round-wipe {
+  0% {
+    transform: translateX(-120%) skewX(-12deg);
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(120%) skewX(-12deg);
+    opacity: 0;
+  }
+}
+.nct-round-wipe {
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    var(--color-nct-steel) 35%,
+    var(--color-nct-amber) 55%,
+    transparent 75%
+  );
+  animation: nct-round-wipe 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .nct-pulse,
-  .nct-rise {
+  .nct-rise,
+  .nct-round-wipe {
     animation: none;
   }
 }

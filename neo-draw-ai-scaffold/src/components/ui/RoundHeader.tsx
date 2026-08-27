@@ -113,30 +113,37 @@ export function RoundHeader({
 
         {/* Timer + score */}
         <div className="ml-auto flex items-center gap-3">
-          <div className="text-right">
-            <div className="nct-label">Score</div>
-            <div
-              className="font-mono text-lg font-bold tabular-nums text-nct-ink"
-              role="status"
-              aria-atomic="true"
-            >
-              <span aria-hidden="true" data-testid="score-value">
-                {displayedScore.toLocaleString()}
-              </span>
-              {/* Announces only the settled value, not every animated
-                  intermediate frame — a live region re-rendered 60x/sec
-                  would be far worse than the static number it replaces. */}
-              <span className="sr-only" aria-live="polite">
-                Score {score.toLocaleString()}
-              </span>
+          <div className="nct-scoreboard flex items-stretch divide-x divide-nct-steel/20 px-2.5 py-1 sm:px-3 sm:py-1.5">
+            <div className="pr-2.5 text-right sm:pr-3">
+              <div className="nct-label">Score</div>
+              <div
+                className="font-mono text-lg font-black tracking-wide tabular-nums text-nct-ink sm:text-xl"
+                role="status"
+                aria-atomic="true"
+              >
+                <span aria-hidden="true" data-testid="score-value">
+                  {displayedScore.toLocaleString()}
+                </span>
+                {/* Announces only the settled value, not every animated
+                    intermediate frame — a live region re-rendered 60x/sec
+                    would be far worse than the static number it replaces. */}
+                <span className="sr-only" aria-live="polite">
+                  Score {score.toLocaleString()}
+                </span>
+              </div>
+            </div>
+            <div className="pl-2.5 text-right sm:pl-3">
+              <div className="nct-label">Round</div>
+              <div className="font-mono text-lg font-black tracking-wide tabular-nums text-nct-ink sm:text-xl">
+                {round}
+              </div>
             </div>
           </div>
-          <div className="text-right">
-            <div className="nct-label">Round</div>
-            <div className="font-mono text-lg font-bold tabular-nums text-nct-ink">{round}</div>
-          </div>
 
-          <div className="relative grid h-16 w-16 shrink-0 place-items-center" title="Time left">
+          <div
+            className={`relative grid h-16 w-16 shrink-0 place-items-center ${urgent ? "nct-pulse" : ""}`}
+            title="Time left"
+          >
             <svg viewBox="0 0 64 64" className="absolute inset-0 -rotate-90" aria-hidden="true">
               <circle
                 cx="32"
