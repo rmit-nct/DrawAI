@@ -9,6 +9,7 @@ import { RoundHeader } from "@/components/ui/RoundHeader";
 import { RoundOverlay } from "@/components/ui/RoundOverlay";
 import { RoundTransitionWipe } from "@/components/ui/RoundTransitionWipe";
 import { useCountdownTimer } from "@/hooks/useCountdownTimer";
+import { useGameAudio } from "@/hooks/useGameAudio";
 import { fetchAICapability, requestGuess } from "@/lib/ai/guessService";
 import { getRandomPrompt, labelMatchesPrompt } from "@/lib/prompts";
 import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from "@/lib/canvas/drawing";
@@ -31,25 +32,20 @@ const ROUND_SECONDS = 30;
  * room for roughly two and a half rounds per minute.
  * ----------------------------------------------------------------------- */
 
-/** Wait this long after the last stroke before guessing. */
 const LIVE_GUESS_DEBOUNCE_MS = 2500;
-/** Never fire two live guesses closer together than this, however fast they draw. */
 const MIN_MS_BETWEEN_LIVE_GUESSES = 4000;
-/** A single extra stroke rarely changes what a drawing looks like. */
 const MIN_NEW_STROKES_PER_GUESS = 2;
-/** Hard ceiling per round, so one long round cannot drain the daily quota. */
 const MAX_LIVE_GUESSES_PER_ROUND = 6;
+const TICKING_START_SECONDS = 8;
 
 export default function Home() {
   const canvasHandle = useRef<DrawingCanvasHandle>(null);
+  const { muted, toggleMuted, playNewRound, startTicking, stopTicking } = useGameAudio();
 
   const [inputMode, setInputMode] = useState<InputMode>("mouse");
   const [color, setColor] = useState<string>(BRUSH_COLORS[0].value);
   const [lineWidth, setLineWidth] = useState<number>(BRUSH_SIZES[1].value);
 
-  // Starts null (identical on server + client) and is filled in on mount, so
-  // Math.random() never runs during SSR — otherwise the server's pick and the
-  // client's differ and React reports a hydration mismatch.
   const [prompt, setPrompt] = useState<string | null>(null);
   const [round, setRound] = useState(1);
   const [score, setScore] = useState(0);
@@ -70,14 +66,9 @@ export default function Home() {
   const inFlight = useRef<AbortController | null>(null);
   const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Live-guess budget state. Refs, not state: these are read inside callbacks
-  // and a re-render on every stroke would be pure waste.
   const strokeCountAtLastGuess = useRef(0);
   const lastGuessAt = useRef(0);
   const liveGuessesThisRound = useRef(0);
-
-  // Keep the latest values reachable from callbacks without re-creating them.
-  // Mirrored in effects, not during render.
   const promptRef = useRef(prompt);
   const aiModeRef = useRef(aiMode);
 
@@ -97,9 +88,6 @@ export default function Home() {
     setPrompt(getRandomPrompt());
   }, []);
 
-  // Ask the server once whether a Gemini key is configured. This replaces the
-  // old hard-coded `USE_MOCK_AI` constant, which meant switching engines
-  // required editing source and redeploying.
   useEffect(() => {
     let cancelled = false;
     fetchAICapability().then(({ configured }) => {
@@ -219,6 +207,8 @@ export default function Home() {
     inFlight.current?.abort();
     inFlight.current = null;
 
+    playNewRound();
+    stopTicking();
     canvasHandle.current?.clear();
     setPrompt((prev) => getRandomPrompt(prev));
     setAiResult(null);
@@ -234,7 +224,7 @@ export default function Home() {
     liveGuessesThisRound.current = 0;
     setLiveBudgetSpent(false);
     restart(ROUND_SECONDS);
-  }, [restart]);
+  }, [restart, playNewRound, stopTicking]);
 
   const keepDrawing = useCallback(() => {
     setRoundResult(null);
@@ -251,10 +241,6 @@ export default function Home() {
       if (!liveGuessing || count === 0 || roundResult) return;
       if (liveTimer.current) clearTimeout(liveTimer.current);
 
-      // Debounce first, then check the budget when the timer actually fires —
-      // not now. Between arming and firing the player may have drawn more, or
-      // another guess may have gone out, so a decision made here would be
-      // 2.5 seconds stale by the time it mattered.
       liveTimer.current = setTimeout(() => {
         const strokesNow = canvasHandle.current?.getStrokes().length ?? 0;
         if (liveGuessBlockedReason(strokesNow) !== null) return;
@@ -291,6 +277,10 @@ export default function Home() {
 
   const roundOver = roundResult !== null;
 
+  useEffect(() => {
+    if (secondsLeft === TICKING_START_SECONDS && !roundOver) startTicking();
+  }, [secondsLeft, roundOver, startTicking]);
+
   return (
     <div className="relative z-10 flex min-h-dvh flex-col">
       <RoundHeader
@@ -301,6 +291,8 @@ export default function Home() {
         round={round}
         isRoundOver={roundOver}
         onNewRound={newRound}
+        muted={muted}
+        onToggleMuted={toggleMuted}
       />
 
       <main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:gap-6">

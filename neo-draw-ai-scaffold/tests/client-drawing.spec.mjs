@@ -7,10 +7,6 @@ function log(name, pass, detail = '') {
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? ' :: ' + detail : ''}`);
 }
 
-// No executablePath: let Playwright resolve its own bundled Chromium, so this
-// runs on Windows and macOS too. The old hard-coded /opt/pw-browsers/... path
-// only ever worked on one Linux machine.
-// Override with CHROME_PATH=... if you want a specific local browser.
 const browser = await chromium.launch({
   ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {}),
   args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
@@ -23,7 +19,23 @@ const pageErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => pageErrors.push(e.message));
 
+await page.addInitScript(() => {
+  window.__playLog = [];
+  window.__pauseLog = [];
+  const origPlay = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function (...args) {
+    window.__playLog.push(this.currentSrc || this.src);
+    return origPlay.apply(this, args);
+  };
+  const origPause = HTMLMediaElement.prototype.pause;
+  HTMLMediaElement.prototype.pause = function (...args) {
+    window.__pauseLog.push(this.currentSrc || this.src);
+    return origPause.apply(this, args);
+  };
+});
+
 await page.goto(URL, { waitUntil: 'networkidle' });
+await page.mouse.click(20, 20); // arms background music (blocked until a user gesture)
 await page.waitForTimeout(900);
 
 const canvas = page.locator('canvas').first();
@@ -161,6 +173,31 @@ const r1 = await readTimer();
 await page.waitForTimeout(2300);
 log('T11b New Round restarts the countdown', r1 !== (await readTimer()), `r1=${r1} r2=${await readTimer()}`);
 
+// ---------- T26: round-transition wipe renders on New Round ----------
+const wipeCount = await page.locator('[data-testid="round-wipe"]').count();
+log('T26 round-transition wipe renders on New Round', wipeCount === 1, `count=${wipeCount}`);
+
+// ---------- T27: mute toggle flips aria-pressed and silences audio elements ----------
+const muteBtn = page.locator('[data-testid="mute-toggle"]');
+const pressedBefore = await muteBtn.getAttribute('aria-pressed');
+await muteBtn.click();
+const pressedAfter = await muteBtn.getAttribute('aria-pressed');
+log('T27 mute toggle flips aria-pressed', pressedBefore !== pressedAfter, `before=${pressedBefore} after=${pressedAfter}`);
+await muteBtn.click(); // unmute again, back to the default state for later tests
+log('T27b mute toggle unmutes back to the original state', (await muteBtn.getAttribute('aria-pressed')) === pressedBefore, '');
+
+// ---------- T28: the three sound assets actually load ----------
+const soundResources = await page.evaluate(() =>
+  performance.getEntriesByType('resource').map((r) => r.name).filter((n) => n.includes('/sound/'))
+);
+log(
+  'T28 background music, new-round, and ticking sounds are all fetched',
+  ['background-music.mp3', 'new-round.wav', 'ticking-sound.wav'].every((f) =>
+    soundResources.some((n) => n.endsWith(f))
+  ),
+  soundResources.join(', ')
+);
+
 // ---------- T12: manual AI guess (mock) ----------
 await stroke([[0.3, 0.3], [0.6, 0.5], [0.4, 0.7], [0.3, 0.3]]);
 await page.getByRole('button', { name: /guess now/i }).click();
@@ -175,18 +212,31 @@ const promptText = await page.locator('main, header').first().innerText();
 log('T13 a drawing prompt is displayed', !/YOUR WORD\s*…/i.test(promptText), (promptText.match(/YOUR WORD\s*\n?\s*\w+/i) || [''])[0].replace(/\n/g, ' '));
 
 // ---------- T23: score has an accessible status region ----------
-// The mock guesser is non-deterministic (confidence grows with stroke
-// count, wrong guesses drawn from CONFUSION_SETS), so this script can't
-// reliably force a scoring round — instead this checks the a11y plumbing
-// and number formatting are correct for whatever the score currently is
-// (0, since no round has scored yet in this run), and that the visible
-// digit settles to the real value rather than getting stuck mid-animation.
-const scoreStatus = page.getByRole('status', { name: /^score/i });
-const scoreStatusText = await scoreStatus.innerText().catch(() => '');
-log('T23 score has an accessible status region', /score\s+0/i.test(scoreStatusText), scoreStatusText);
+const scoreStatus = page.locator('[role="status"]').first();
+const scoreStatusText = (await scoreStatus.textContent().catch(() => '')) ?? '';
+log('T23 score has an accessible status region', /score\s*0/i.test(scoreStatusText), scoreStatusText);
 await page.waitForTimeout(700); // past the ~600ms count-up duration
 const scoreDigits = (await page.locator('[data-testid="score-value"]').innerText().catch(() => '')).trim();
 log('T23b displayed score settles to the real value', scoreDigits === '0', scoreDigits);
+
+// ---------- T24: timer pulses when urgent (<=10s left) ----------
+await page.evaluate(() => {
+  const realNow = Date.now;
+  let offset = 0;
+  window.__advance = (ms) => { offset += ms; };
+  Date.now = () => realNow.call(Date) + offset;
+});
+await page.evaluate(() => window.__advance(18000)); // 30s round -> a few seconds left, safely inside the urgent (<=10s) window with margin on both sides
+await page.waitForTimeout(400); // one 250ms timer tick, plus margin
+const ringWrapperClass = await page.evaluate(() => {
+  const timerEl = document.querySelector('[role="timer"]');
+  return timerEl?.closest('[title="Time left"]')?.className ?? '';
+});
+log('T24 timer ring pulses in the urgent window', /nct-pulse/.test(ringWrapperClass), ringWrapperClass);
+
+// ---------- T25: scoreboard treatment is applied ----------
+const scoreboardCount = await page.locator('.nct-scoreboard').count();
+log('T25 Score/Round grouped in the scoreboard treatment', scoreboardCount === 1, `count=${scoreboardCount}`);
 
 // ---------- T14: API failure must NOT crash the UI (old crash bug) ----------
 const errCountBefore = pageErrors.length;
@@ -252,9 +302,6 @@ const videoInfo = await page.evaluate(() => {
 bodyText = await page.locator('body').innerText();
 log('T17 webcam mode mounts a video element', videoInfo.exists, JSON.stringify(videoInfo));
 log('T17b webcam preview is visible (not display:none)', videoInfo.exists && videoInfo.display !== 'none' && videoInfo.boxW > 50, `display=${videoInfo.display} box=${videoInfo.boxW}x${videoInfo.boxH}`);
-// NOTE: this sandbox blocks storage.googleapis.com, so the MediaPipe model
-// cannot download here. The camera preview must stay live regardless, and the
-// failure must be reported as a MODEL problem, not a camera problem.
 log('T17c camera preview stays live when the model fails', videoInfo.w > 0 && !videoInfo.paused, `${videoInfo.w}x${videoInfo.h} ready=${videoInfo.ready} paused=${videoInfo.paused}`);
 const modelErr = (bodyText.match(/Could not load[^\n]*/i) || [''])[0];
 log('T17d error names the model, not the camera', !/Failed to start webcam/i.test(bodyText) && /Could not load the hand-tracking model/i.test(bodyText), modelErr.slice(0, 90) || 'no model error');
@@ -312,6 +359,72 @@ const dprInfo = await page.evaluate(() => {
   return { backing: c.width, css: Math.round(c.getBoundingClientRect().width), dpr: window.devicePixelRatio };
 });
 log('T20 canvas backing store matches CSS size × DPR', dprInfo.backing >= dprInfo.css, JSON.stringify(dprInfo));
+
+// ---------- T29: sound effects actually fire at the right moments ----------
+await page.evaluate(() => { window.__playLog.length = 0; });
+await page.getByRole('button', { name: /new round/i }).first().click();
+await page.waitForTimeout(150);
+const playLogAfterNewRound = await page.evaluate(() => window.__playLog.slice());
+log(
+  'T29 New Round plays the new-round sound effect',
+  playLogAfterNewRound.some((src) => src.includes('new-round.wav')),
+  playLogAfterNewRound.join(', ')
+);
+
+await page.evaluate(() => {
+  const realNow = Date.now;
+  let offset = 0;
+  Date.now = () => realNow.call(Date) + offset;
+  window.__advance = (ms) => { offset += ms; };
+});
+await page.evaluate(() => window.__advance(22000)); // 30s round -> 8s left
+await page.waitForTimeout(400); // one 250ms timer tick, plus margin
+const timerAtEight = await readTimer();
+const playLogAtEight = await page.evaluate(() => window.__playLog.slice());
+log(
+  'T29b ticking sound starts when the timer hits 8 seconds left',
+  timerAtEight === '00:08' && playLogAtEight.some((src) => src.includes('ticking-sound.wav')),
+  `timer=${timerAtEight} log=${playLogAtEight.join(', ')}`
+);
+
+// ---------- T29d: mute/unmute silences ticking without pausing it, so it stays in sync with the timer ----------
+const tickingState = () =>
+  page.evaluate(() => {
+    const el = Array.from(document.querySelectorAll('audio')).find((a) => a.src.includes('ticking-sound'));
+    return el ? { paused: el.paused, muted: el.muted, currentTime: el.currentTime } : null;
+  });
+const beforeMute = await tickingState();
+await muteBtn.click(); // mute
+await page.waitForTimeout(300);
+const whileMuted = await tickingState();
+await muteBtn.click(); // unmute
+await page.waitForTimeout(300);
+const afterUnmute = await tickingState();
+log(
+  'T29d ticking never pauses across mute/unmute (stays in sync with the timer)',
+  !beforeMute.paused && !whileMuted.paused && !afterUnmute.paused,
+  JSON.stringify({ beforeMute, whileMuted, afterUnmute })
+);
+log(
+  "T29d' mute/unmute only flips audibility, playhead keeps advancing throughout",
+  whileMuted.muted === true &&
+    afterUnmute.muted === false &&
+    whileMuted.currentTime > beforeMute.currentTime &&
+    afterUnmute.currentTime > whileMuted.currentTime,
+  JSON.stringify({ beforeMute, whileMuted, afterUnmute })
+);
+
+// ---------- T29c: the round ending naturally must NOT cut the ticking sound short ----------
+await page.evaluate(() => { window.__pauseLog.length = 0; });
+await page.evaluate(() => window.__advance(9000)); // pushes past 0 -> round expires
+await page.waitForTimeout(400);
+const timerAtZero = await readTimer();
+const pauseLogAtZero = await page.evaluate(() => window.__pauseLog.slice());
+log(
+  'T29c ticking sound is left to finish playing when the round ends naturally',
+  timerAtZero === '00:00' && !pauseLogAtZero.some((src) => src.includes('ticking-sound.wav')),
+  `timer=${timerAtZero} pauseLog=${pauseLogAtZero.join(', ')}`
+);
 
 await page.screenshot({ path: process.env.SHOT || '/tmp/neo/shot.png', fullPage: false });
 

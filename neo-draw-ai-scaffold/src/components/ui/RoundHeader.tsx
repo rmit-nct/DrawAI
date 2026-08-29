@@ -11,6 +11,8 @@ interface RoundHeaderProps {
   round: number;
   isRoundOver: boolean;
   onNewRound: () => void;
+  muted: boolean;
+  onToggleMuted: () => void;
 }
 
 function formatTime(seconds: number) {
@@ -22,12 +24,6 @@ function formatTime(seconds: number) {
 const RING_RADIUS = 27;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
-/**
- * Animates `value` from its previous value to the new one over `durationMs`
- * (ease-out cubic), for the score count-up. Skips the animation entirely
- * under prefers-reduced-motion — jumps straight to the final value, same
- * policy as .nct-pulse/.nct-rise in globals.css.
- */
 function useCountUp(value: number, durationMs = 600) {
   const [display, setDisplay] = useState(value);
   const fromRef = useRef(value);
@@ -76,6 +72,8 @@ export function RoundHeader({
   round,
   isRoundOver,
   onNewRound,
+  muted,
+  onToggleMuted,
 }: RoundHeaderProps) {
   const pct = Math.max(0, Math.min(100, (secondsLeft / totalSeconds) * 100));
   const urgent = secondsLeft <= 10 && secondsLeft > 0 && !isRoundOver;
@@ -124,9 +122,6 @@ export function RoundHeader({
                 <span aria-hidden="true" data-testid="score-value">
                   {displayedScore.toLocaleString()}
                 </span>
-                {/* Announces only the settled value, not every animated
-                    intermediate frame — a live region re-rendered 60x/sec
-                    would be far worse than the static number it replaces. */}
                 <span className="sr-only" aria-live="polite">
                   Score {score.toLocaleString()}
                 </span>
@@ -179,6 +174,29 @@ export function RoundHeader({
               {formatTime(secondsLeft)}
             </div>
           </div>
+
+          <button
+            onClick={onToggleMuted}
+            aria-pressed={muted}
+            aria-label={muted ? "Unmute sound" : "Mute sound"}
+            title={muted ? "Unmute sound" : "Mute sound"}
+            data-testid="mute-toggle"
+            className="nct-focus grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-nct-steel/30 text-nct-steel-light transition hover:bg-nct-700"
+          >
+            {muted ? (
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+                <line x1="16" y1="9" x2="22" y2="15" />
+                <line x1="22" y1="9" x2="16" y2="15" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+                <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                <path d="M18 6a9 9 0 0 1 0 12" />
+              </svg>
+            )}
+          </button>
 
           <button
             onClick={onNewRound}
