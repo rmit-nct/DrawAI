@@ -32,6 +32,12 @@ interface DrawingCanvasProps {
   showWebcamBackground?: boolean;
   /** Same video element the hand-tracking hook streams into — shared, not a second camera request. */
   videoRef?: RefObject<HTMLVideoElement | null>;
+  /**
+   * Allow mouse/touch drawing on the canvas. Set false in webcam mode so the
+   * hand gesture is the only thing driving strokes — otherwise a stray mouse
+   * move and the pinch gesture both write to the same in-progress stroke.
+   */
+  pointerInputEnabled?: boolean;
 }
 
 /**
@@ -53,6 +59,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       children,
       showWebcamBackground = false,
       videoRef,
+      pointerInputEnabled = true,
     },
     ref
   ) {
@@ -74,6 +81,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       disabled,
       onStrokesChange,
       transparentBackground: showWebcamBackground,
+      pointerInputEnabled,
     });
 
     useImperativeHandle(
@@ -122,7 +130,9 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
             onPointerCancel={handlePointerUp}
             aria-label="Drawing canvas"
             role="img"
-            className={`nct-canvas relative z-10 block w-full ${disabled ? "pointer-events-none" : ""}`}
+            className={`nct-canvas relative z-10 block w-full ${
+              disabled || !pointerInputEnabled ? "pointer-events-none" : ""
+            }`}
           />
           {children}
         </div>

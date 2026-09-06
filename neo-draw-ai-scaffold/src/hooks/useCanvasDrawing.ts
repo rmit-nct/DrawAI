@@ -19,6 +19,12 @@ interface UseCanvasDrawingOptions {
   disabled?: boolean;
   /** Leaves the canvas background transparent so a layer behind it (webcam feed) shows through. */
   transparentBackground?: boolean;
+  /**
+   * Gates the pointer (mouse/touch) path only. Turned off in webcam mode so
+   * the gesture source is the sole writer of the in-progress stroke — the
+   * imperative startStrokeAt/extendStrokeTo/endStroke path is unaffected.
+   */
+  pointerInputEnabled?: boolean;
 }
 
 /**
@@ -47,6 +53,7 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
     onStrokesChange,
     disabled = false,
     transparentBackground = false,
+    pointerInputEnabled = true,
   } = options;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -67,6 +74,7 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
   const disabledRef = useRef(disabled);
   const onStrokesChangeRef = useRef(onStrokesChange);
   const transparentRef = useRef(transparentBackground);
+  const pointerInputEnabledRef = useRef(pointerInputEnabled);
 
   useEffect(() => {
     brush.current = { color, lineWidth };
@@ -165,7 +173,7 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (disabledRef.current || !canvasRef.current) return;
+      if (disabledRef.current || !pointerInputEnabledRef.current || !canvasRef.current) return;
       if (e.pointerType === "mouse" && e.button !== 0) return; // ignore right/middle click
 
       // Pointer capture keeps the stroke alive when the cursor leaves the
@@ -183,7 +191,7 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (!canvasRef.current || currentRef.current === null) return;
+      if (!pointerInputEnabledRef.current || !canvasRef.current || currentRef.current === null) return;
       if (activePointerId.current !== null && e.pointerId !== activePointerId.current) return;
 
       // Coalesced events give every sample the OS captured between frames,
@@ -215,6 +223,15 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
     },
     [endStroke]
   );
+
+  // Mirrored in an effect (not during render) so toggling the mode never
+  // re-creates the pointer handlers. If pointer input is switched off while a
+  // drag is in progress — e.g. the user flips to webcam mode mid-stroke —
+  // commit what was drawn instead of leaving it stuck in currentRef.
+  useEffect(() => {
+    pointerInputEnabledRef.current = pointerInputEnabled;
+    if (!pointerInputEnabled && activePointerId.current !== null) handlePointerUp();
+  }, [pointerInputEnabled, handlePointerUp]);
 
   // ------------------------------------------------------------- history ---
 
