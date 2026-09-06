@@ -3,7 +3,7 @@ import {
   HandLandmarker,
   type HandLandmarkerResult,
 } from "@mediapipe/tasks-vision";
-import type { HandTrackingResult, Point } from "@/types";
+import type { HandGesture, HandTrackingResult, Point } from "@/types";
 
 /**
  * MediaPipe Tasks Vision wrapper: loads the HandLandmarker model and turns one
@@ -102,6 +102,18 @@ const INDEX_FINGER_TIP = 8;
 const WRIST = 0;
 const MIDDLE_FINGER_MCP = 9;
 
+// PIP (middle knuckle) and TIP per non-thumb finger, used to tell an
+// extended finger from a curled one.
+const INDEX_PIP = 6;
+const MIDDLE_PIP = 10;
+const MIDDLE_TIP = 12;
+const RING_PIP = 14;
+const RING_TIP = 16;
+const PINKY_PIP = 18;
+const PINKY_TIP = 20;
+// Thumb's equivalent middle joint — it only has three segments (CMC/MCP/IP/TIP).
+const THUMB_IP = 3;
+
 /**
  * Pinch is measured relative to hand size, not in raw normalized units.
  * A fixed 0.06 threshold only worked at one particular distance from the
@@ -113,6 +125,45 @@ const PINCH_OFF_RATIO = 0.58; // pen up — hysteresis stops flickering mid-stro
 
 function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+/**
+ * A finger is "extended" when its tip sits farther from the wrist than its
+ * own PIP joint — radial distance from the wrist, not screen-space y, so
+ * this holds regardless of how the hand is rotated in frame. Curling a
+ * finger folds the tip back toward the palm, pulling it closer to the wrist
+ * than the PIP.
+ */
+function isExtended(wrist: Point, pip: Point, tip: Point): boolean {
+  return distance(wrist, tip) > distance(wrist, pip) * 1.05;
+}
+
+/**
+ * Classifies the whole hand shape from the four non-thumb fingers (thumb
+ * moves too differently from the others to fit the same radial test, so it's
+ * only consulted to tell a plain fist from a thumbs-up). Pinch always wins
+ * over the shape read, since a pinch mid-gesture can momentarily look like a
+ * fist or a peace sign.
+ */
+function classifyGesture(
+  landmarks: { x: number; y: number }[],
+  isPinching: boolean
+): HandGesture {
+  if (isPinching) return "pinch";
+
+  const wrist = landmarks[WRIST];
+  const indexExt = isExtended(wrist, landmarks[INDEX_PIP], landmarks[INDEX_FINGER_TIP]);
+  const middleExt = isExtended(wrist, landmarks[MIDDLE_PIP], landmarks[MIDDLE_TIP]);
+  const ringExt = isExtended(wrist, landmarks[RING_PIP], landmarks[RING_TIP]);
+  const pinkyExt = isExtended(wrist, landmarks[PINKY_PIP], landmarks[PINKY_TIP]);
+
+  if (indexExt && middleExt && ringExt && pinkyExt) return "openPalm";
+  if (!indexExt && !middleExt && !ringExt && !pinkyExt) {
+    const thumbExt = isExtended(wrist, landmarks[THUMB_IP], landmarks[THUMB_TIP]);
+    return thumbExt ? "thumbsUp" : "fist";
+  }
+  if (indexExt && middleExt && !ringExt && !pinkyExt) return "peace";
+  return "none";
 }
 
 let wasPinching = false;
@@ -131,12 +182,12 @@ export function detectHand(
     result = landmarker.detectForVideo(video, timestampMs);
   } catch {
     // A dropped/duplicate frame shouldn't kill the render loop.
-    return { indexFingerTip: null, isPinching: false, handedness: null, pinchStrength: 0 };
+    return { indexFingerTip: null, isPinching: false, handedness: null, pinchStrength: 0, gesture: "none" };
   }
 
   if (!result.landmarks || result.landmarks.length === 0) {
     wasPinching = false;
-    return { indexFingerTip: null, isPinching: false, handedness: null, pinchStrength: 0 };
+    return { indexFingerTip: null, isPinching: false, handedness: null, pinchStrength: 0, gesture: "none" };
   }
 
   const landmarks = result.landmarks[0];
@@ -146,7 +197,7 @@ export function detectHand(
   const middleMcp = landmarks[MIDDLE_FINGER_MCP];
 
   if (!indexTip || !thumbTip || !wrist || !middleMcp) {
-    return { indexFingerTip: null, isPinching: false, handedness: null, pinchStrength: 0 };
+    return { indexFingerTip: null, isPinching: false, handedness: null, pinchStrength: 0, gesture: "none" };
   }
 
   const handSize = Math.max(distance(wrist, middleMcp), 1e-4);
@@ -164,6 +215,7 @@ export function detectHand(
     isPinching,
     handedness,
     pinchStrength: Math.max(0, Math.min(1, 1 - ratio / PINCH_OFF_RATIO)),
+    gesture: classifyGesture(landmarks, isPinching),
   };
 }
 
