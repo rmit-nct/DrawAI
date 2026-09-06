@@ -80,19 +80,26 @@ export function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke | null 
   ctx.restore();
 }
 
-/** Repaint everything: background + committed strokes + the in-progress stroke. */
+/**
+ * Repaint everything: background + committed strokes + the in-progress stroke.
+ * Pass `backgroundColor: null` (webcam mode) to leave the canvas transparent
+ * so a video layer behind it shows through.
+ */
 export function redrawAll(
   canvas: HTMLCanvasElement,
   strokes: Stroke[],
   current?: Stroke | null,
-  backgroundColor = CANVAS_BACKGROUND
+  backgroundColor: string | null = CANVAS_BACKGROUND
 ) {
   if (!applyCanvasTransform(canvas)) return;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  ctx.fillStyle = backgroundColor;
-  ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+  ctx.clearRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+  if (backgroundColor) {
+    ctx.fillStyle = backgroundColor;
+    ctx.fillRect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT);
+  }
 
   for (const stroke of strokes) drawStroke(ctx, stroke);
   if (current) drawStroke(ctx, current);

@@ -53,6 +53,12 @@ export interface RoundResult {
   pending?: boolean;
 }
 
+/**
+ * Static hand shapes recognised in addition to the pinch, used as one-shot
+ * commands (hold briefly to fire) rather than continuous drawing input.
+ */
+export type HandGesture = "none" | "pinch" | "fist" | "openPalm" | "peace" | "thumbsUp";
+
 // Hand landmark subset we care about (wrist + index fingertip)
 // Full list: https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker
 export interface HandTrackingResult {
@@ -61,6 +67,7 @@ export interface HandTrackingResult {
   handedness: "Left" | "Right" | null;
   /** 0-1 strength of the pinch, used for on-screen feedback. */
   pinchStrength: number;
+  gesture: HandGesture;
 }
 
 export type WebcamStatus = "idle" | "requesting-camera" | "loading-model" | "ready" | "error";
