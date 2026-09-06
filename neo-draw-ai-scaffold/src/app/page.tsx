@@ -388,6 +388,9 @@ export default function Home() {
               onStrokesChange={handleStrokesChange}
               showWebcamBackground={inputMode === "webcam"}
               videoRef={webcamVideoRef}
+              // Webcam mode: the hand gesture is the sole stroke driver, so a
+              // stray mouse move over the canvas can't also draw.
+              pointerInputEnabled={inputMode !== "webcam"}
             >
               {/* No synthetic fingertip cursor in webcam mode: the live camera
                   feed now renders behind the canvas (showWebcamBackground), so
