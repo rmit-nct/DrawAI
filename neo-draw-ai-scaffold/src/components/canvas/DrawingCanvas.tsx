@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useImperativeHandle, type ReactNode } from "react";
+import { forwardRef, useImperativeHandle, type ReactNode, type RefObject } from "react";
 import { useCanvasDrawing } from "@/hooks/useCanvasDrawing";
 import { CANVAS_ASPECT, exportDrawing } from "@/lib/canvas/drawing";
 import type { Point, Stroke } from "@/types";
@@ -24,6 +24,14 @@ interface DrawingCanvasProps {
   onStrokesChange?: (strokeCount: number) => void;
   /** Overlay rendered above the canvas (round-over card, fingertip cursor…). */
   children?: ReactNode;
+  /**
+   * Shows the live webcam feed behind the canvas (mirrored, like the gesture
+   * preview) and makes the canvas background transparent so strokes are drawn
+   * directly over the video instead of over white.
+   */
+  showWebcamBackground?: boolean;
+  /** Same video element the hand-tracking hook streams into — shared, not a second camera request. */
+  videoRef?: RefObject<HTMLVideoElement | null>;
 }
 
 /**
@@ -36,7 +44,18 @@ interface DrawingCanvasProps {
  * and the drawing survives resizes and orientation changes.
  */
 export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>(
-  function DrawingCanvas({ color, lineWidth, disabled = false, onStrokesChange, children }, ref) {
+  function DrawingCanvas(
+    {
+      color,
+      lineWidth,
+      disabled = false,
+      onStrokesChange,
+      children,
+      showWebcamBackground = false,
+      videoRef,
+    },
+    ref
+  ) {
     const {
       canvasRef,
       handlePointerDown,
@@ -49,7 +68,13 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
       undo,
       redo,
       clear,
-    } = useCanvasDrawing({ color, lineWidth, disabled, onStrokesChange });
+    } = useCanvasDrawing({
+      color,
+      lineWidth,
+      disabled,
+      onStrokesChange,
+      transparentBackground: showWebcamBackground,
+    });
 
     useImperativeHandle(
       ref,
@@ -74,6 +99,20 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
           className="absolute inset-0 translate-x-2 translate-y-2 rounded-2xl bg-nct-amber/85"
         />
         <div className="relative overflow-hidden rounded-2xl border border-nct-steel/40 bg-white shadow-[0_24px_60px_-30px_rgba(0,0,0,0.95)]">
+          {showWebcamBackground && (
+            // Mirrored to match the fingertip-mirroring applied to gesture
+            // coordinates, so drawing lines up with what the user sees of
+            // their own hand. Absolute + z-0 keeps it under the canvas
+            // regardless of DOM order (positioned elements would otherwise
+            // stack above the static-positioned canvas).
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              aria-hidden
+              className="absolute inset-0 z-0 h-full w-full -scale-x-100 object-cover"
+            />
+          )}
           <canvas
             ref={canvasRef}
             style={{ aspectRatio: CANVAS_ASPECT }}
@@ -83,7 +122,7 @@ export const DrawingCanvas = forwardRef<DrawingCanvasHandle, DrawingCanvasProps>
             onPointerCancel={handlePointerUp}
             aria-label="Drawing canvas"
             role="img"
-            className={`nct-canvas block w-full ${disabled ? "pointer-events-none" : ""}`}
+            className={`nct-canvas relative z-10 block w-full ${disabled ? "pointer-events-none" : ""}`}
           />
           {children}
         </div>

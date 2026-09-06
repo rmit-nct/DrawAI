@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useHandTracking } from "@/hooks/useHandTracking";
 import type { DrawingCanvasHandle } from "@/components/canvas/DrawingCanvas";
 import { normalizedToLogical } from "@/lib/canvas/drawing";
@@ -12,7 +12,38 @@ interface WebcamGestureLayerProps {
   /** Reports the fingertip in logical canvas space so the page can draw a cursor. */
   onCursorChange?: (cursor: (Point & { pinching: boolean }) | null) => void;
   paused?: boolean;
+  /** Shared with the canvas's webcam-background layer — one stream, rendered in two places. */
+  videoRef?: RefObject<HTMLVideoElement | null>;
+  /** Hold a fist to fire. */
+  onUndo?: () => void;
+  /** Hold an open palm to fire. */
+  onClear?: () => void;
+  /** Hold a peace sign to fire. */
+  onCycleColor?: () => void;
+  /** Hold a thumbs up to fire. */
+  onCycleBrushSize?: () => void;
 }
+
+/** The static shapes that act as one-shot, hold-to-fire commands. */
+type HeldGesture = "none" | "fist" | "openPalm" | "peace" | "thumbsUp";
+
+/** How long a shape must be held, stationary, before it fires. */
+const GESTURE_HOLD_MS = 550;
+
+export const GESTURE_EMOJI: Record<"pinch" | Exclude<HeldGesture, "none">, string> = {
+  pinch: "🤏",
+  fist: "✊",
+  openPalm: "✋",
+  peace: "✌️",
+  thumbsUp: "👍",
+};
+
+const GESTURE_HINT: Record<Exclude<HeldGesture, "none">, string> = {
+  fist: "a fist — undoing",
+  openPalm: "an open palm — clearing",
+  peace: "a peace sign — changing colour",
+  thumbsUp: "a thumbs up — changing brush size",
+};
 
 /**
  * Webcam gesture input.
@@ -32,12 +63,34 @@ export function WebcamGestureLayer({
   canvasHandle,
   onCursorChange,
   paused = false,
+  videoRef,
+  onUndo,
+  onClear,
+  onCycleColor,
+  onCycleBrushSize,
 }: WebcamGestureLayerProps) {
   const wasPinching = useRef(false);
   const pausedRef = useRef(paused);
   const onCursorChangeRef = useRef(onCursorChange);
+  const onUndoRef = useRef(onUndo);
+  const onClearRef = useRef(onClear);
+  const onCycleColorRef = useRef(onCycleColor);
+  const onCycleBrushSizeRef = useRef(onCycleBrushSize);
 
   const [handVisible, setHandVisible] = useState(false);
+  // Which held-shape command is currently being tracked, and any brief
+  // "it fired" confirmation to show while it's still fresh.
+  const [heldGesture, setHeldGesture] = useState<HeldGesture>("none");
+  const [firedMessage, setFiredMessage] = useState<string | null>(null);
+
+  // Not React state: the hold timer is read/written every single detection
+  // frame (up to 60/s), and only the discrete transitions below need a render.
+  const gestureRef = useRef<{ gesture: HeldGesture; since: number; fired: boolean }>({
+    gesture: "none",
+    since: 0,
+    fired: false,
+  });
+  const firedMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Mirrored into refs in effects (not during render) so the detection callback
   // stays referentially stable and never restarts the webcam pipeline.
@@ -48,6 +101,34 @@ export function WebcamGestureLayer({
   useEffect(() => {
     onCursorChangeRef.current = onCursorChange;
   }, [onCursorChange]);
+
+  useEffect(() => {
+    onUndoRef.current = onUndo;
+  }, [onUndo]);
+
+  useEffect(() => {
+    onClearRef.current = onClear;
+  }, [onClear]);
+
+  useEffect(() => {
+    onCycleColorRef.current = onCycleColor;
+  }, [onCycleColor]);
+
+  useEffect(() => {
+    onCycleBrushSizeRef.current = onCycleBrushSize;
+  }, [onCycleBrushSize]);
+
+  const flashFired = useCallback((message: string) => {
+    setFiredMessage(message);
+    if (firedMessageTimer.current) clearTimeout(firedMessageTimer.current);
+    firedMessageTimer.current = setTimeout(() => setFiredMessage(null), 900);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (firedMessageTimer.current) clearTimeout(firedMessageTimer.current);
+    };
+  }, []);
 
   const handleResult = useCallback(
     (result: HandTrackingResult) => {
@@ -60,6 +141,10 @@ export function WebcamGestureLayer({
         wasPinching.current = false;
         setHandVisible(false);
         onCursorChangeRef.current?.(null);
+        if (gestureRef.current.gesture !== "none") {
+          gestureRef.current = { gesture: "none", since: 0, fired: false };
+          setHeldGesture("none");
+        }
         return;
       }
 
@@ -79,13 +164,51 @@ export function WebcamGestureLayer({
       }
 
       wasPinching.current = result.isPinching;
+
+      // Static-shape commands: fist/open-palm/peace/thumbs-up fire once after
+      // being held steady for GESTURE_HOLD_MS, then require the hand to
+      // change shape again before they can re-fire — so holding a fist
+      // doesn't undo the whole drawing in one go.
+      const shape: HeldGesture =
+        result.gesture === "fist" ||
+        result.gesture === "openPalm" ||
+        result.gesture === "peace" ||
+        result.gesture === "thumbsUp"
+          ? result.gesture
+          : "none";
+
+      const tracked = gestureRef.current;
+      if (shape !== tracked.gesture) {
+        gestureRef.current = { gesture: shape, since: performance.now(), fired: false };
+        setHeldGesture(shape);
+      } else if (
+        shape !== "none" &&
+        !tracked.fired &&
+        performance.now() - tracked.since >= GESTURE_HOLD_MS
+      ) {
+        tracked.fired = true;
+        if (shape === "fist") {
+          onUndoRef.current?.();
+          flashFired("Undid last stroke");
+        } else if (shape === "openPalm") {
+          onClearRef.current?.();
+          flashFired("Canvas cleared");
+        } else if (shape === "peace") {
+          onCycleColorRef.current?.();
+          flashFired("Colour changed");
+        } else if (shape === "thumbsUp") {
+          onCycleBrushSizeRef.current?.();
+          flashFired("Brush size changed");
+        }
+      }
     },
-    [canvasHandle]
+    [canvasHandle, flashFired]
   );
 
-  const { videoRef, status, error, retry, cameraLive } = useHandTracking({
+  const { status, error, retry } = useHandTracking({
     enabled,
     onResult: handleResult,
+    videoRef,
   });
 
   const statusText: Record<typeof status, string> = {
@@ -115,40 +238,47 @@ export function WebcamGestureLayer({
         <span className="ml-auto truncate text-[0.7rem] text-nct-muted">{statusText[status]}</span>
       </header>
 
-      <div className="relative aspect-[4/3] w-full bg-nct-900">
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          // -scale-x-100 mirrors the preview so it reads like a mirror, matching
-          // the x-flip applied to the tracked coordinates.
-          className={`h-full w-full -scale-x-100 object-cover transition-opacity ${
-            status === "ready" || cameraLive ? "opacity-100" : "opacity-0"
-          }`}
-        />
-
-        {status !== "ready" && (
-          <div
-            className={`absolute inset-0 grid place-items-center gap-2 p-4 text-center ${
-              cameraLive ? "bg-nct-900/80" : ""
-            }`}
-          >
-            {status === "error" ? (
-              <div className="max-h-full w-full space-y-2 overflow-y-auto">
-                <p className="text-[0.7rem] leading-relaxed break-words hyphens-auto text-nct-danger">
-                  {error}
-                </p>
-                <button
-                  onClick={retry}
-                  className="nct-focus rounded-lg bg-nct-steel px-3 py-1.5 text-xs font-bold text-nct-900 transition hover:bg-nct-steel-light"
-                >
-                  Retry
-                </button>
-              </div>
-            ) : (
-              <p className="text-xs text-nct-muted">{statusText[status]}</p>
-            )}
-          </div>
+      {/* The live feed itself now renders behind the drawing canvas (see
+          DrawingCanvas's showWebcamBackground layer), sharing this same
+          videoRef/stream — this panel only surfaces status and errors. */}
+      <div className="relative w-full bg-nct-900 p-4">
+        {status !== "ready" ? (
+          status === "error" ? (
+            <div className="space-y-2">
+              <p className="text-[0.7rem] leading-relaxed break-words hyphens-auto text-nct-danger">
+                {error}
+              </p>
+              <button
+                onClick={retry}
+                className="nct-focus rounded-lg bg-nct-steel px-3 py-1.5 text-xs font-bold text-nct-900 transition hover:bg-nct-steel-light"
+              >
+                Retry
+              </button>
+            </div>
+          ) : (
+            <p className="text-xs text-nct-muted">{statusText[status]}</p>
+          )
+        ) : firedMessage ? (
+          <p className="text-[0.7rem] font-bold text-nct-success">{firedMessage}</p>
+        ) : heldGesture !== "none" ? (
+          <p className="text-[0.7rem] leading-snug text-nct-ink/90">
+            Holding{" "}
+            <span className="font-bold text-nct-amber">
+              {GESTURE_EMOJI[heldGesture]} {GESTURE_HINT[heldGesture]}
+            </span>
+            … keep still.
+          </p>
+        ) : (
+          <p className="text-[0.7rem] leading-snug text-nct-ink/90">
+            <span className="font-bold text-nct-amber">{GESTURE_EMOJI.pinch} Pinch</span> to draw ·{" "}
+            <span className="font-bold text-nct-amber">{GESTURE_EMOJI.fist} fist</span> held to
+            undo · <span className="font-bold text-nct-amber">{GESTURE_EMOJI.openPalm} open palm</span>{" "}
+            held to clear ·{" "}
+            <span className="font-bold text-nct-amber">{GESTURE_EMOJI.peace} peace sign</span> held
+            to change colour ·{" "}
+            <span className="font-bold text-nct-amber">{GESTURE_EMOJI.thumbsUp} thumbs up</span> held
+            to change brush size. Look at the canvas — that&apos;s your camera.
+          </p>
         )}
       </div>
     </section>

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DrawingCanvas, type DrawingCanvasHandle } from "@/components/canvas/DrawingCanvas";
-import { WebcamGestureLayer } from "@/components/webcam/WebcamGestureLayer";
+import { WebcamGestureLayer, GESTURE_EMOJI } from "@/components/webcam/WebcamGestureLayer";
 import { GuessReveal } from "@/components/ai/GuessReveal";
 import { Toolbar, BRUSH_COLORS, BRUSH_SIZES } from "@/components/ui/Toolbar";
 import { RoundHeader } from "@/components/ui/RoundHeader";
@@ -12,8 +12,7 @@ import { useCountdownTimer } from "@/hooks/useCountdownTimer";
 import { useGameAudio } from "@/hooks/useGameAudio";
 import { fetchAICapability, requestGuess } from "@/lib/ai/guessService";
 import { getRandomPrompt, labelMatchesPrompt } from "@/lib/prompts";
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from "@/lib/canvas/drawing";
-import type { AIGuessResponse, AIMode, InputMode, Point, RoundResult } from "@/types";
+import type { AIGuessResponse, AIMode, InputMode, RoundResult } from "@/types";
 
 // 30s, not 60s. Commit 346282a was titled "Reduce Guessing time to 30s" but
 // only renamed .env.example -> .env; the timer itself was never changed.
@@ -41,6 +40,9 @@ const TICKING_START_SECONDS = 8;
 export default function Home() {
   const canvasHandle = useRef<DrawingCanvasHandle>(null);
   const { muted, toggleMuted, playNewRound, startTicking, stopTicking } = useGameAudio();
+  // Shared between the canvas's webcam-background layer and the gesture
+  // tracker so both render/read the exact same MediaStream, not two cameras.
+  const webcamVideoRef = useRef<HTMLVideoElement>(null);
 
   const [inputMode, setInputMode] = useState<InputMode>("mouse");
   const [color, setColor] = useState<string>(BRUSH_COLORS[0].value);
@@ -61,7 +63,6 @@ export default function Home() {
   const [liveGuessing, setLiveGuessing] = useState(true);
   const [liveBudgetSpent, setLiveBudgetSpent] = useState(false);
 
-  const [cursor, setCursor] = useState<(Point & { pinching: boolean }) | null>(null);
 
   const inFlight = useRef<AbortController | null>(null);
   const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -226,6 +227,20 @@ export default function Home() {
     restart(ROUND_SECONDS);
   }, [restart, playNewRound, stopTicking]);
 
+  const cycleColor = useCallback(() => {
+    setColor((prev) => {
+      const index = BRUSH_COLORS.findIndex((c) => c.value === prev);
+      return BRUSH_COLORS[(index + 1) % BRUSH_COLORS.length].value;
+    });
+  }, []);
+
+  const cycleBrushSize = useCallback(() => {
+    setLineWidth((prev) => {
+      const index = BRUSH_SIZES.findIndex((s) => s.value === prev);
+      return BRUSH_SIZES[(index + 1) % BRUSH_SIZES.length].value;
+    });
+  }, []);
+
   const keepDrawing = useCallback(() => {
     setRoundResult(null);
     pause();
@@ -312,44 +327,34 @@ export default function Home() {
             disabled={roundOver}
           />
 
-          {inputMode === "webcam" ? (
-            <>
-              <WebcamGestureLayer
-                enabled
-                canvasHandle={canvasHandle}
-                onCursorChange={setCursor}
-                paused={roundOver}
-              />
-              <p className="text-center text-xs leading-relaxed text-nct-muted">
-                Pinch your thumb and index finger together to put the pen down, and move your hand
-                to draw. Release to lift the pen.
-              </p>
-            </>
-          ) : (
-            <section className="nct-panel hidden p-4 lg:block">
-              <h2 className="nct-label !text-nct-steel-light">How to play</h2>
-              <ol className="mt-3 space-y-2.5 text-xs leading-relaxed text-nct-muted">
-                <li>
-                  <span className="font-bold text-nct-ink">1.</span> Draw the word at the top before
-                  the timer runs out.
-                </li>
-                <li>
-                  <span className="font-bold text-nct-ink">2.</span> The AI guesses as you go — get
-                  it as the top guess for the most points.
-                </li>
-                <li>
-                  <span className="font-bold text-nct-ink">3.</span> Switch to{" "}
-                  <button
-                    onClick={() => setInputMode("webcam")}
-                    className="nct-focus font-bold text-nct-amber underline underline-offset-2"
-                  >
-                    Webcam
-                  </button>{" "}
-                  to draw in the air with a pinch gesture.
-                </li>
-              </ol>
-            </section>
+          {inputMode === "webcam" && (
+            <WebcamGestureLayer
+              enabled
+              canvasHandle={canvasHandle}
+              paused={roundOver}
+              videoRef={webcamVideoRef}
+              onUndo={() => canvasHandle.current?.undo()}
+              onClear={() => canvasHandle.current?.clear()}
+              onCycleColor={cycleColor}
+              onCycleBrushSize={cycleBrushSize}
+            />
           )}
+
+          {/* Always shown. The gesture panel above only covers webcam mode, and
+              this guide still applies while drawing with a mouse or touch. */}
+          <section className="nct-panel hidden p-4 lg:block">
+            <h2 className="nct-label !text-nct-steel-light">How to play</h2>
+            <ol className="mt-3 space-y-2.5 text-xs leading-relaxed text-nct-muted">
+              <li>
+                <p className="text-xs leading-relaxed text-nct-muted">
+              {inputMode === "webcam"
+                ? `${GESTURE_EMOJI.pinch} Pinch your thumb and index finger together to put the pen down, and move your hand to draw. Release to lift. Hold ${GESTURE_EMOJI.fist} a fist to u
+ndo, ${GESTURE_EMOJI.openPalm} an open palm to clear, ${GESTURE_EMOJI.peace} a peace sign to change colour, or ${GESTURE_EMOJI.thumbsUp} a thumbs up to change brush size.`
+                : "Click or tap and drag to draw. ⌘/Ctrl+Z undoes, ⇧⌘/Ctrl+Z redoes."}
+            </p>
+              </li>
+            </ol>
+          </section>
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-4 lg:order-1">
           <div
@@ -362,23 +367,13 @@ export default function Home() {
               lineWidth={lineWidth}
               disabled={roundOver}
               onStrokesChange={handleStrokesChange}
+              showWebcamBackground={inputMode === "webcam"}
+              videoRef={webcamVideoRef}
             >
-            {/* Fingertip cursor, drawn in canvas space so it lines up exactly. */}
-            {inputMode === "webcam" && cursor && !roundOver && (
-              <span
-                aria-hidden
-                className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 transition-[width,height] duration-100"
-                style={{
-                  left: `${(cursor.x / LOGICAL_WIDTH) * 100}%`,
-                  top: `${(cursor.y / LOGICAL_HEIGHT) * 100}%`,
-                  width: cursor.pinching ? 18 : 30,
-                  height: cursor.pinching ? 18 : 30,
-                  borderColor: cursor.pinching ? "#F8B73A" : "#5095AA",
-                  backgroundColor: cursor.pinching ? "rgba(248,183,58,0.35)" : "transparent",
-                }}
-              />
-            )}
-
+              {/* No synthetic fingertip cursor in webcam mode: the live camera
+                  feed now renders behind the canvas (showWebcamBackground), so
+                  the user's real hand is already on screen and a drawn circle
+                  over it looked like a glitchy double cursor. */}
               <RoundTransitionWipe key={round} />
 
               <RoundOverlay

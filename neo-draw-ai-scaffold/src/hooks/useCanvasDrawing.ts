@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Point, Stroke } from "@/types";
 import {
   applyCanvasTransform,
+  CANVAS_BACKGROUND,
   drawStroke,
   getRelativePoint,
   redrawAll,
@@ -16,6 +17,8 @@ interface UseCanvasDrawingOptions {
   onStrokesChange?: (strokeCount: number) => void;
   /** Blocks all input — used while the round-over overlay is up. */
   disabled?: boolean;
+  /** Leaves the canvas background transparent so a layer behind it (webcam feed) shows through. */
+  transparentBackground?: boolean;
 }
 
 /**
@@ -38,7 +41,13 @@ interface UseCanvasDrawingOptions {
  * endStroke directly, so gesture drawing and pointer drawing share one path.
  */
 export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
-  const { lineWidth = 6, color = "#1F2844", onStrokesChange, disabled = false } = options;
+  const {
+    lineWidth = 6,
+    color = "#1F2844",
+    onStrokesChange,
+    disabled = false,
+    transparentBackground = false,
+  } = options;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const strokesRef = useRef<Stroke[]>([]);
@@ -57,6 +66,7 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
   const brush = useRef({ color, lineWidth });
   const disabledRef = useRef(disabled);
   const onStrokesChangeRef = useRef(onStrokesChange);
+  const transparentRef = useRef(transparentBackground);
 
   useEffect(() => {
     brush.current = { color, lineWidth };
@@ -73,8 +83,20 @@ export function useCanvasDrawing(options: UseCanvasDrawingOptions = {}) {
   /** Full repaint, including any in-progress stroke. */
   const repaint = useCallback(() => {
     if (!canvasRef.current) return;
-    redrawAll(canvasRef.current, strokesRef.current, currentRef.current);
+    redrawAll(
+      canvasRef.current,
+      strokesRef.current,
+      currentRef.current,
+      transparentRef.current ? null : CANVAS_BACKGROUND
+    );
   }, []);
+
+  // Switching in/out of webcam mode changes whether the background should be
+  // transparent; repaint immediately instead of waiting for the next stroke.
+  useEffect(() => {
+    transparentRef.current = transparentBackground;
+    repaint();
+  }, [transparentBackground, repaint]);
 
   const commitChange = useCallback(() => {
     setStrokeCount(strokesRef.current.length);

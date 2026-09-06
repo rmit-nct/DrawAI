@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { HandLandmarker } from "@mediapipe/tasks-vision";
 import { detectHand, initHandLandmarker, resetPinchState } from "@/lib/mediapipe/handTracking";
 import type { HandTrackingResult, WebcamStatus } from "@/types";
@@ -8,6 +8,13 @@ import type { HandTrackingResult, WebcamStatus } from "@/types";
 interface UseHandTrackingOptions {
   enabled: boolean;
   onResult?: (result: HandTrackingResult) => void;
+  /**
+   * Video element to stream into. Pass one in when something else (e.g. the
+   * canvas's webcam-background layer) also needs to render this exact
+   * stream — sharing the element avoids a second getUserMedia() call.
+   * Falls back to an internally-owned element when omitted.
+   */
+  videoRef?: RefObject<HTMLVideoElement | null>;
 }
 
 /**
@@ -24,8 +31,9 @@ interface UseHandTrackingOptions {
  *    tears down and restarts the whole webcam pipeline on every render.
  *  - Frames are only fed to the model when the video timestamp actually moved.
  */
-export function useHandTracking({ enabled, onResult }: UseHandTrackingOptions) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+export function useHandTracking({ enabled, onResult, videoRef: externalVideoRef }: UseHandTrackingOptions) {
+  const internalVideoRef = useRef<HTMLVideoElement | null>(null);
+  const videoRef = externalVideoRef ?? internalVideoRef;
   const landmarkerRef = useRef<HandLandmarker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafId = useRef<number | null>(null);
@@ -61,6 +69,9 @@ export function useHandTracking({ enabled, onResult }: UseHandTrackingOptions) {
     if (videoRef.current) videoRef.current.srcObject = null;
     lastVideoTime.current = -1;
     resetPinchState();
+    // videoRef is either the caller's own useRef() (stable identity) or our
+    // internal one — either way it never changes across renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -163,6 +174,8 @@ export function useHandTracking({ enabled, onResult }: UseHandTrackingOptions) {
       stopCamera();
       setCameraLive(false);
     };
+    // videoRef is stable across renders (see stopCamera above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, attempt, stopCamera]);
 
   return { videoRef, status, error, retry, cameraLive };
