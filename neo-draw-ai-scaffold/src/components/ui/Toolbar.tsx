@@ -28,7 +28,6 @@ export const BRUSH_SIZES = [
 
 const INPUT_MODES: Array<{ mode: InputMode; label: string; hint: string; icon: Icon }> = [
   { mode: "mouse", label: "Mouse", hint: "Draw by clicking and dragging", icon: Mouse },
-  { mode: "touch", label: "Touch", hint: "Draw with your finger or a stylus", icon: HandTap },
   {
     mode: "webcam",
     label: "Webcam",
