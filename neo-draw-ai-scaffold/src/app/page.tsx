@@ -346,33 +346,12 @@ export default function Home() {
             <h2 className="nct-label !text-nct-steel-light">How to play</h2>
             <ol className="mt-3 space-y-2.5 text-xs leading-relaxed text-nct-muted">
               <li>
-                <span className="font-bold text-nct-ink">1.</span> Draw the word at the top before
-                the timer runs out.
-              </li>
-              <li>
-                <span className="font-bold text-nct-ink">2.</span> The AI guesses as you go — get it
-                as the top guess for the most points.
-              </li>
-              <li>
-                <span className="font-bold text-nct-ink">3.</span> Switch to{" "}
-                <button
-                  onClick={() => setInputMode("webcam")}
-                  className="nct-focus font-bold text-nct-amber underline underline-offset-2"
-                >
-                  Webcam
-                </button>{" "}
-                — your camera feed shows right on the canvas. {GESTURE_EMOJI.pinch}{" "}
-                <span className="font-bold text-nct-ink">Pinch</span> your thumb and index finger to
-                draw in the air.
-              </li>
-              <li>
-                <span className="font-bold text-nct-ink">4.</span> In Webcam mode, hold a shape for a
-                moment to fire it: {GESTURE_EMOJI.fist}{" "}
-                <span className="font-bold text-nct-ink">fist</span> undoes, {GESTURE_EMOJI.openPalm}{" "}
-                <span className="font-bold text-nct-ink">open palm</span> clears, {GESTURE_EMOJI.peace}{" "}
-                <span className="font-bold text-nct-ink">peace sign</span> changes colour, and{" "}
-                {GESTURE_EMOJI.thumbsUp} <span className="font-bold text-nct-ink">thumbs up</span>{" "}
-                changes brush size.
+                <p className="text-xs leading-relaxed text-nct-muted">
+              {inputMode === "webcam"
+                ? `${GESTURE_EMOJI.pinch} Pinch your thumb and index finger together to put the pen down, and move your hand to draw. Release to lift. Hold ${GESTURE_EMOJI.fist} a fist to u
+ndo, ${GESTURE_EMOJI.openPalm} an open palm to clear, ${GESTURE_EMOJI.peace} a peace sign to change colour, or ${GESTURE_EMOJI.thumbsUp} a thumbs up to change brush size.`
+                : "Click or tap and drag to draw. ⌘/Ctrl+Z undoes, ⇧⌘/Ctrl+Z redoes."}
+            </p>
               </li>
             </ol>
           </section>
