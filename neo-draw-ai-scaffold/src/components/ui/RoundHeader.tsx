@@ -97,11 +97,11 @@ export function RoundHeader({
         </div>
 
         {/* Prompt */}
-        <div className="order-3 w-full sm:order-none sm:w-auto sm:flex-1">
+        <div className="order-3 w-full sm:order-none sm:flex sm:flex-1 sm:justify-center">
           <div className="nct-panel flex items-center gap-3 px-4 py-2.5">
             <span className="nct-label shrink-0">Your word</span>
             <span
-              className="truncate text-lg font-black uppercase tracking-wide text-nct-amber sm:text-xl"
+              className="truncate text-xl font-black uppercase tracking-wide text-nct-amber sm:text-2xl"
               aria-live="polite"
             >
               {prompt ?? "…"}

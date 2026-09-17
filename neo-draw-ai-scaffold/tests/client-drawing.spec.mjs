@@ -269,6 +269,9 @@ log('T15 non-JSON API response handled gracefully', pageErrors.length === errBef
 await page.unroute('**/api/guess');
 
 // ---------- T16: round end -> overlay + scoring ----------
+await page.getByRole('button', { name: /new round/i }).last().click();
+await page.waitForTimeout(600);
+
 await page.evaluate(() => {
   // shortcut: we can't wait 60s, so drive the clock by faking Date.now
   const realNow = Date.now;
@@ -283,6 +286,34 @@ log('T16 round ends with an end-of-round card', /time's up|nice drawing/i.test(b
   (bodyText.match(/(TIME'S UP|NICE DRAWING)[\s\S]{0,60}/i) || [''])[0].replace(/\n/g, ' | '));
 const timerAtEnd = await readTimer();
 log('T16b timer stops at 00:00', timerAtEnd === '00:00', `timer=${timerAtEnd}`);
+
+// ---------- T16c: a correct guess ends the round immediately, before 00:00 ----------
+await page.getByRole('button', { name: /new round/i }).last().click();
+await page.waitForTimeout(600);
+const promptForMatch = (await page.locator('main, header').first().innerText())
+  .match(/YOUR WORD\s*\n?\s*(\w+)/i)?.[1] ?? '';
+await page.route('**/api/guess', (route) =>
+  route.request().method() === 'POST'
+    ? route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ guesses: [{ label: promptForMatch, confidence: 0.95 }], isMock: false }),
+      })
+    : route.continue()
+);
+await stroke([[0.2, 0.2], [0.5, 0.4], [0.7, 0.3]]);
+await page.getByRole('button', { name: /guess now/i }).click();
+await page.waitForTimeout(2000);
+bodyText = await page.locator('body').innerText();
+log('T16c a correct guess shows "Nice drawing" without waiting for the timer',
+  /nice drawing/i.test(bodyText), (bodyText.match(/NICE DRAWING[\s\S]{0,60}/i) || [''])[0].replace(/\n/g, ' | '));
+const timerRightAfterGuess = await readTimer();
+await page.waitForTimeout(2000);
+const timerAfterWaiting = await readTimer();
+log('T16d timer freezes above 00:00 on an early correct guess (proves it did not just wait it out)',
+  timerRightAfterGuess !== '00:00' && timerRightAfterGuess === timerAfterWaiting,
+  `rightAfter=${timerRightAfterGuess} after2s=${timerAfterWaiting}`);
+await page.unroute('**/api/guess');
 
 // back to a fresh round
 await page.getByRole('button', { name: /new round/i }).last().click();

@@ -70,6 +70,8 @@ export default function Home() {
   const strokeCountAtLastGuess = useRef(0);
   const lastGuessAt = useRef(0);
   const liveGuessesThisRound = useRef(0);
+  const roundEndedRef = useRef(false);
+  const pauseRef = useRef<() => void>(() => {});
   const promptRef = useRef(prompt);
   const aiModeRef = useRef(aiMode);
 
@@ -127,6 +129,37 @@ export default function Home() {
     return null;
   }, []);
 
+  /**
+   * Applies the outcome of a guess result to score + roundResult. Guarded so
+   * it only ever fires once per round — see roundEndedRef above.
+   */
+  const completeRound = useCallback(
+    (result: AIGuessResponse | null, fallbackReason: "time-up" | "guessed" = "time-up") => {
+      if (roundEndedRef.current) return;
+      roundEndedRef.current = true;
+
+      const currentPrompt = promptRef.current;
+      const match =
+        currentPrompt && result
+          ? (result.guesses.find((g) => labelMatchesPrompt(g.label, currentPrompt)) ?? null)
+          : null;
+
+      // Rank matters: getting it as the top guess is worth more than third.
+      const rank = match && result ? result.guesses.indexOf(match) : -1;
+      const points = match ? Math.max(20, 100 - rank * 25) : 0;
+
+      if (points > 0) setScore((s) => s + points);
+      setRoundResult({
+        prompt: currentPrompt ?? "",
+        guessed: Boolean(match),
+        matchedLabel: match?.label ?? null,
+        pointsAwarded: points,
+        reason: match ? "guessed" : fallbackReason,
+      });
+    },
+    []
+  );
+
   const runGuess = useCallback(async (): Promise<AIGuessResponse | null> => {
     const strokes = canvasHandle.current?.getStrokes() ?? [];
     if (strokes.length === 0) return null;
@@ -148,6 +181,19 @@ export default function Home() {
       });
       if (controller.signal.aborted) return null;
       setAiResult(result);
+
+      // A correct guess ends the round right away instead of waiting for the
+      // timer to hit 0 — this fires for both live guesses and "Guess now".
+      if (!roundEndedRef.current && promptRef.current) {
+        const match = result.guesses.find((g) => labelMatchesPrompt(g.label, promptRef.current!));
+        if (match) {
+          if (liveTimer.current) clearTimeout(liveTimer.current);
+          stopTicking();
+          pauseRef.current();
+          completeRound(result, "guessed");
+        }
+      }
+
       return result;
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return null;
@@ -161,7 +207,7 @@ export default function Home() {
         setAiLoading(false);
       }
     }
-  }, []);
+  }, [completeRound, stopTicking]);
 
   // ----------------------------------------------------------- round flow ---
 
@@ -178,30 +224,18 @@ export default function Home() {
     });
 
     const result = await runGuess();
-
-    const match =
-      currentPrompt && result
-        ? (result.guesses.find((g) => labelMatchesPrompt(g.label, currentPrompt)) ?? null)
-        : null;
-
-    // Rank matters: getting it as the top guess is worth more than third.
-    const rank = match && result ? result.guesses.indexOf(match) : -1;
-    const points = match ? Math.max(20, 100 - rank * 25) : 0;
-
-    if (points > 0) setScore((s) => s + points);
-    setRoundResult({
-      prompt: currentPrompt ?? "",
-      guessed: Boolean(match),
-      matchedLabel: match?.label ?? null,
-      pointsAwarded: points,
-      reason: match ? "guessed" : "time-up",
-    });
-  }, [runGuess]);
+    // No-op if runGuess already ended the round early via a correct guess.
+    completeRound(result, "time-up");
+  }, [runGuess, completeRound]);
 
   const { secondsLeft, restart, pause } = useCountdownTimer(ROUND_SECONDS, {
     autoStart: true, // the first round used to sit frozen at 01:00 until you pressed New Round
     onExpire: finishRound,
   });
+
+  useEffect(() => {
+    pauseRef.current = pause;
+  }, [pause]);
 
   const newRound = useCallback(() => {
     if (liveTimer.current) clearTimeout(liveTimer.current);
@@ -223,6 +257,7 @@ export default function Home() {
     strokeCountAtLastGuess.current = 0;
     lastGuessAt.current = 0;
     liveGuessesThisRound.current = 0;
+    roundEndedRef.current = false;
     setLiveBudgetSpent(false);
     restart(ROUND_SECONDS);
   }, [restart, playNewRound, stopTicking]);
@@ -392,10 +427,6 @@ export default function Home() {
               // stray mouse move over the canvas can't also draw.
               pointerInputEnabled={inputMode !== "webcam"}
             >
-              {/* No synthetic fingertip cursor in webcam mode: the live camera
-                  feed now renders behind the canvas (showWebcamBackground), so
-                  the user's real hand is already on screen and a drawn circle
-                  over it looked like a glitchy double cursor. */}
               <RoundTransitionWipe key={round} />
 
               <RoundOverlay
