@@ -163,6 +163,7 @@ function classifyGesture(
     return thumbExt ? "thumbsUp" : "fist";
   }
   if (indexExt && middleExt && !ringExt && !pinkyExt) return "peace";
+  if (indexExt && !middleExt && !ringExt && !pinkyExt) return "point";
   return "none";
 }
 

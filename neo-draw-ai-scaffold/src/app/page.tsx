@@ -3,16 +3,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DrawingCanvas, type DrawingCanvasHandle } from "@/components/canvas/DrawingCanvas";
 import { WebcamGestureLayer, GESTURE_EMOJI } from "@/components/webcam/WebcamGestureLayer";
+import { GuessHistoryModal } from "@/components/ai/GuessHistoryModal";
 import { GuessReveal } from "@/components/ai/GuessReveal";
 import { Toolbar, BRUSH_COLORS, BRUSH_SIZES } from "@/components/ui/Toolbar";
+import { GameSummary } from "@/components/ui/GameSummary";
+import { Leaderboard } from "@/components/ui/Leaderboard";
 import { RoundHeader } from "@/components/ui/RoundHeader";
 import { RoundOverlay } from "@/components/ui/RoundOverlay";
+import { RoundReviewOverlay } from "@/components/ui/RoundReviewOverlay";
 import { RoundTransitionWipe } from "@/components/ui/RoundTransitionWipe";
+import { StartScreen } from "@/components/ui/StartScreen";
 import { useCountdownTimer } from "@/hooks/useCountdownTimer";
 import { useGameAudio } from "@/hooks/useGameAudio";
 import { fetchAICapability, requestGuess } from "@/lib/ai/guessService";
+import { computeStrokeBounds, exportDrawing } from "@/lib/canvas/drawing";
+import { saveLeaderboardEntry } from "@/lib/leaderboard";
 import { getRandomPrompt, labelMatchesPrompt } from "@/lib/prompts";
-import type { AIGuessResponse, AIMode, InputMode, RoundResult } from "@/types";
+import type {
+  AIGuessResponse,
+  AIMode,
+  GuessHistoryEntry,
+  InputMode,
+  RoundResult,
+  RoundSummary,
+} from "@/types";
 
 // 30s, not 60s. Commit 346282a was titled "Reduce Guessing time to 30s" but
 // only renamed .env.example -> .env; the timer itself was never changed.
@@ -36,6 +50,12 @@ const MIN_MS_BETWEEN_LIVE_GUESSES = 4000;
 const MIN_NEW_STROKES_PER_GUESS = 2;
 const MAX_LIVE_GUESSES_PER_ROUND = 6;
 const TICKING_START_SECONDS = 8;
+const CORRECT_GUESS_COUNTDOWN_SECONDS = 3;
+const TOTAL_ROUNDS = 10;
+// Caps memory for a round that never budget-limits live guessing (mock mode)
+// — only the most recent snapshots matter for the end-of-round replay.
+const MAX_GUESS_HISTORY_ENTRIES = 10;
+const GUESS_HISTORY_SNAPSHOT_WIDTH = 160;
 
 export default function Home() {
   const canvasHandle = useRef<DrawingCanvasHandle>(null);
@@ -62,10 +82,31 @@ export default function Home() {
   const [geminiAvailable, setGeminiAvailable] = useState(false);
   const [liveGuessing, setLiveGuessing] = useState(true);
   const [liveBudgetSpent, setLiveBudgetSpent] = useState(false);
-
+  const [correctGuessCountdown, setCorrectGuessCountdown] = useState<number | null>(null);
+  const [guessHistory, setGuessHistory] = useState<GuessHistoryEntry[]>([]);
+  // Survives "Keep drawing" clearing roundResult, so the on-demand replay
+  // modal still knows whether/what the AI guessed for this round.
+  const [lastRoundInfo, setLastRoundInfo] = useState<{
+    guessed: boolean;
+    matchedLabel: string | null;
+  } | null>(null);
+  const [keepDrawingActive, setKeepDrawingActive] = useState(false);
+  const [showGuessHistoryModal, setShowGuessHistoryModal] = useState(false);
+  // Every completed round this game, for the end-of-game results grid.
+  const [roundSummaries, setRoundSummaries] = useState<RoundSummary[]>([]);
+  const [gameOver, setGameOver] = useState(false);
+  const [viewingSummary, setViewingSummary] = useState<RoundSummary | null>(null);
+  // The round timer doesn't start until this flips — see StartScreen.
+  const [gameStarted, setGameStarted] = useState(false);
+  // Entered on the StartScreen, only ever written to the leaderboard once
+  // finishGame() actually runs — a refresh mid-game saves nothing.
+  const [playerName, setPlayerName] = useState("");
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
 
   const inFlight = useRef<AbortController | null>(null);
   const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const correctGuessTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const guessHistoryIdRef = useRef(0);
 
   const strokeCountAtLastGuess = useRef(0);
   const lastGuessAt = useRef(0);
@@ -74,6 +115,8 @@ export default function Home() {
   const pauseRef = useRef<() => void>(() => {});
   const promptRef = useRef(prompt);
   const aiModeRef = useRef(aiMode);
+  const roundRef = useRef(round);
+  const guessHistoryRef = useRef<GuessHistoryEntry[]>(guessHistory);
 
   useEffect(() => {
     promptRef.current = prompt;
@@ -82,6 +125,14 @@ export default function Home() {
   useEffect(() => {
     aiModeRef.current = aiMode;
   }, [aiMode]);
+
+  useEffect(() => {
+    roundRef.current = round;
+  }, [round]);
+
+  useEffect(() => {
+    guessHistoryRef.current = guessHistory;
+  }, [guessHistory]);
 
   useEffect(() => {
     // Client-only initialisation on purpose: picking the word during SSR would
@@ -156,6 +207,22 @@ export default function Home() {
         pointsAwarded: points,
         reason: match ? "guessed" : fallbackReason,
       });
+      setLastRoundInfo({ guessed: Boolean(match), matchedLabel: match?.label ?? null });
+
+      const finalSnapshot =
+        exportDrawing(canvasHandle.current?.getStrokes() ?? [], GUESS_HISTORY_SNAPSHOT_WIDTH) ?? "";
+      setRoundSummaries((prev) => [
+        ...prev,
+        {
+          round: roundRef.current,
+          prompt: currentPrompt ?? "",
+          guessed: Boolean(match),
+          matchedLabel: match?.label ?? null,
+          pointsAwarded: points,
+          finalSnapshot,
+          guessHistory: guessHistoryRef.current,
+        },
+      ]);
     },
     []
   );
@@ -182,15 +249,57 @@ export default function Home() {
       if (controller.signal.aborted) return null;
       setAiResult(result);
 
-      // A correct guess ends the round right away instead of waiting for the
-      // timer to hit 0 — this fires for both live guesses and "Guess now".
-      if (!roundEndedRef.current && promptRef.current) {
+      // Snapshot the drawing alongside this guess so the end-of-round overlay
+      // can replay how the AI's read of it evolved (skip failed calls — no
+      // guesses to show for those).
+      if (!result.error && result.guesses.length > 0) {
+        const snapshot = exportDrawing(strokes, GUESS_HISTORY_SNAPSHOT_WIDTH);
+        if (snapshot) {
+          // Best-effort proxy for "what made the AI say this": the strokes
+          // added since the previous guess in this round. Neither Gemini nor
+          // the mock guesser expose real attention data, so this diffs the
+          // input instead of pretending to read the model's mind.
+          const previousCount = guessHistoryRef.current.at(-1)?.strokeCount ?? 0;
+          const newStrokes = strokes.slice(previousCount);
+          const newStrokeBounds = computeStrokeBounds(newStrokes.length > 0 ? newStrokes : strokes);
+
+          guessHistoryIdRef.current += 1;
+          const entry: GuessHistoryEntry = {
+            id: guessHistoryIdRef.current,
+            strokeCount: strokes.length,
+            snapshot,
+            guesses: result.guesses,
+            isMock: result.isMock,
+            newStrokeBounds,
+          };
+          setGuessHistory((prev) => [...prev, entry].slice(-MAX_GUESS_HISTORY_ENTRIES));
+        }
+      }
+
+      // A correct guess ends the round instead of waiting for the timer to
+      // hit 0 — this fires for both live guesses and "Guess now". Rather than
+      // jumping straight to the reveal card, hold on a big countdown for a
+      // few seconds first so the drawer actually notices the AI got it.
+      if (!roundEndedRef.current && !correctGuessTimer.current && promptRef.current) {
         const match = result.guesses.find((g) => labelMatchesPrompt(g.label, promptRef.current!));
         if (match) {
           if (liveTimer.current) clearTimeout(liveTimer.current);
           stopTicking();
           pauseRef.current();
-          completeRound(result, "guessed");
+
+          const tick = (secondsLeft: number) => {
+            setCorrectGuessCountdown(secondsLeft);
+            correctGuessTimer.current = setTimeout(() => {
+              if (secondsLeft <= 1) {
+                correctGuessTimer.current = null;
+                setCorrectGuessCountdown(null);
+                completeRound(result, "guessed");
+              } else {
+                tick(secondsLeft - 1);
+              }
+            }, 1000);
+          };
+          tick(CORRECT_GUESS_COUNTDOWN_SECONDS);
         }
       }
 
@@ -229,7 +338,10 @@ export default function Home() {
   }, [runGuess, completeRound]);
 
   const { secondsLeft, restart, pause } = useCountdownTimer(ROUND_SECONDS, {
-    autoStart: true, // the first round used to sit frozen at 01:00 until you pressed New Round
+    // Held off until the player presses "Start game" on the StartScreen —
+    // autoStart used to fire the moment the page loaded, burning round 1's
+    // clock while they were still reading the rules.
+    autoStart: false,
     onExpire: finishRound,
   });
 
@@ -237,8 +349,11 @@ export default function Home() {
     pauseRef.current = pause;
   }, [pause]);
 
-  const newRound = useCallback(() => {
+  /** Shared reset between advancing to the next round and starting a fresh game. */
+  const resetRoundState = useCallback(() => {
     if (liveTimer.current) clearTimeout(liveTimer.current);
+    if (correctGuessTimer.current) clearTimeout(correctGuessTimer.current);
+    correctGuessTimer.current = null;
     inFlight.current?.abort();
     inFlight.current = null;
 
@@ -249,9 +364,13 @@ export default function Home() {
     setAiResult(null);
     setAiLoading(false);
     setRoundResult(null);
+    setCorrectGuessCountdown(null);
+    setGuessHistory([]);
+    setLastRoundInfo(null);
+    setKeepDrawingActive(false);
+    setShowGuessHistoryModal(false);
     setStrokeCount(0);
     setCanRedo(false);
-    setRound((r) => r + 1);
 
     // Fresh budget for the new round.
     strokeCountAtLastGuess.current = 0;
@@ -261,6 +380,51 @@ export default function Home() {
     setLiveBudgetSpent(false);
     restart(ROUND_SECONDS);
   }, [restart, playNewRound, stopTicking]);
+
+  const newRound = useCallback(() => {
+    resetRoundState();
+    setRound((r) => r + 1);
+  }, [resetRoundState]);
+
+  /**
+   * Stops the game after the round-10 reveal — no more rounds to advance to.
+   * The only place a leaderboard entry gets written: never on mount/refresh,
+   * so an abandoned game leaves no trace.
+   */
+  const finishGame = useCallback(() => {
+    if (liveTimer.current) clearTimeout(liveTimer.current);
+    if (correctGuessTimer.current) clearTimeout(correctGuessTimer.current);
+    correctGuessTimer.current = null;
+    inFlight.current?.abort();
+    inFlight.current = null;
+    stopTicking();
+    pauseRef.current();
+    saveLeaderboardEntry({ name: playerName, score, roundSummaries });
+    setGameOver(true);
+  }, [stopTicking, playerName, score, roundSummaries]);
+
+  /** Wired to every "advance" control (header + overlay) — ends the game on the last round instead. */
+  const advanceRound = useCallback(() => {
+    if (roundRef.current >= TOTAL_ROUNDS) finishGame();
+    else newRound();
+  }, [newRound, finishGame]);
+
+  const playAgain = useCallback(() => {
+    resetRoundState();
+    setScore(0);
+    setRound(1);
+    setRoundSummaries([]);
+    setGameOver(false);
+    setViewingSummary(null);
+    setShowLeaderboard(false);
+  }, [resetRoundState]);
+
+  const startGame = useCallback(() => {
+    if (!playerName.trim()) return; // StartScreen's button is disabled for this too — belt and suspenders
+    setGameStarted(true);
+    playNewRound();
+    restart(ROUND_SECONDS);
+  }, [restart, playNewRound, playerName]);
 
   const cycleColor = useCallback(() => {
     setColor((prev) => {
@@ -278,6 +442,7 @@ export default function Home() {
 
   const keepDrawing = useCallback(() => {
     setRoundResult(null);
+    setKeepDrawingActive(true);
     pause();
   }, [pause]);
 
@@ -288,7 +453,7 @@ export default function Home() {
       setStrokeCount(count);
       setCanRedo(Boolean(canvasHandle.current) && count >= 0);
 
-      if (!liveGuessing || count === 0 || roundResult) return;
+      if (!liveGuessing || count === 0 || roundResult || correctGuessCountdown !== null) return;
       if (liveTimer.current) clearTimeout(liveTimer.current);
 
       liveTimer.current = setTimeout(() => {
@@ -299,12 +464,13 @@ export default function Home() {
         void runGuess();
       }, LIVE_GUESS_DEBOUNCE_MS);
     },
-    [liveGuessing, roundResult, runGuess, liveGuessBlockedReason]
+    [liveGuessing, roundResult, correctGuessCountdown, runGuess, liveGuessBlockedReason]
   );
 
   useEffect(() => {
     return () => {
       if (liveTimer.current) clearTimeout(liveTimer.current);
+      if (correctGuessTimer.current) clearTimeout(correctGuessTimer.current);
       inFlight.current?.abort();
     };
   }, []);
@@ -325,11 +491,51 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const roundOver = roundResult !== null;
+  const roundOver = roundResult !== null || correctGuessCountdown !== null;
 
   useEffect(() => {
     if (secondsLeft === TICKING_START_SECONDS && !roundOver) startTicking();
   }, [secondsLeft, roundOver, startTicking]);
+
+  if (!gameStarted) {
+    return (
+      <div className="relative z-10 flex min-h-dvh flex-col">
+        <StartScreen
+          totalRounds={TOTAL_ROUNDS}
+          name={playerName}
+          onNameChange={setPlayerName}
+          onStart={startGame}
+          onViewLeaderboard={() => setShowLeaderboard(true)}
+        />
+        {showLeaderboard && (
+          <Leaderboard onClose={() => setShowLeaderboard(false)} onSelectRound={setViewingSummary} />
+        )}
+        {viewingSummary && (
+          <RoundReviewOverlay summary={viewingSummary} onClose={() => setViewingSummary(null)} />
+        )}
+      </div>
+    );
+  }
+
+  if (gameOver) {
+    return (
+      <div className="relative z-10 flex min-h-dvh flex-col">
+        <GameSummary
+          summaries={roundSummaries}
+          score={score}
+          onSelectRound={setViewingSummary}
+          onPlayAgain={playAgain}
+          onViewLeaderboard={() => setShowLeaderboard(true)}
+        />
+        {showLeaderboard && (
+          <Leaderboard onClose={() => setShowLeaderboard(false)} onSelectRound={setViewingSummary} />
+        )}
+        {viewingSummary && (
+          <RoundReviewOverlay summary={viewingSummary} onClose={() => setViewingSummary(null)} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="relative z-10 flex min-h-dvh flex-col">
@@ -339,8 +545,9 @@ export default function Home() {
         totalSeconds={ROUND_SECONDS}
         score={score}
         round={round}
+        totalRounds={TOTAL_ROUNDS}
         isRoundOver={roundOver}
-        onNewRound={newRound}
+        onNewRound={advanceRound}
         muted={muted}
         onToggleMuted={toggleMuted}
       />
@@ -372,6 +579,9 @@ export default function Home() {
               onClear={() => canvasHandle.current?.clear()}
               onCycleColor={cycleColor}
               onCycleBrushSize={cycleBrushSize}
+              onGuessNow={() => {
+                if (strokeCount > 0 && !roundOver) void runGuess();
+              }}
             />
           ) : (
             <section className="nct-panel hidden p-4 lg:block">
@@ -403,8 +613,10 @@ export default function Home() {
                   <span className="font-bold text-nct-ink">fist</span> undoes, {GESTURE_EMOJI.openPalm}{" "}
                   <span className="font-bold text-nct-ink">open palm</span> clears,{" "}
                   {GESTURE_EMOJI.peace} <span className="font-bold text-nct-ink">peace sign</span>{" "}
-                  changes colour, and {GESTURE_EMOJI.thumbsUp}{" "}
-                  <span className="font-bold text-nct-ink">thumbs up</span> changes brush size.
+                  changes colour, {GESTURE_EMOJI.thumbsUp}{" "}
+                  <span className="font-bold text-nct-ink">thumbs up</span> changes brush size, and{" "}
+                  {GESTURE_EMOJI.point} <span className="font-bold text-nct-ink">pointing finger</span>{" "}
+                  guesses now.
                 </li>
               </ol>
             </section>
@@ -431,9 +643,22 @@ export default function Home() {
 
               <RoundOverlay
                 result={roundResult}
-                onNewRound={newRound}
+                correctGuessCountdown={correctGuessCountdown}
+                guessHistory={guessHistory}
+                isFinalRound={round >= TOTAL_ROUNDS}
+                onNewRound={advanceRound}
                 onKeepDrawing={keepDrawing}
               />
+
+              {showGuessHistoryModal && (
+                <GuessHistoryModal
+                  history={guessHistory}
+                  prompt={prompt}
+                  guessed={lastRoundInfo?.guessed ?? false}
+                  matchedLabel={lastRoundInfo?.matchedLabel ?? null}
+                  onClose={() => setShowGuessHistoryModal(false)}
+                />
+              )}
             </DrawingCanvas>
           </div>
 
@@ -449,6 +674,8 @@ export default function Home() {
             liveBudgetSpent={liveBudgetSpent && aiMode === "gemini"}
             onGuessNow={() => void runGuess()}
             canGuess={strokeCount > 0 && !roundOver}
+            showHistoryButton={keepDrawingActive && guessHistory.length > 0}
+            onShowHistory={() => setShowGuessHistoryModal(true)}
           />
         </div>
       </main>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Sparkle } from "@phosphor-icons/react";
+import { ClockCounterClockwise, Sparkle } from "@phosphor-icons/react";
 import type { AIGuessResponse, AIMode } from "@/types";
 import { labelMatchesPrompt } from "@/lib/prompts";
 
@@ -17,6 +17,9 @@ interface GuessRevealProps {
   canGuess: boolean;
   /** True once this round's live-guess budget is spent (Gemini mode only). */
   liveBudgetSpent: boolean;
+  /** Shown only while "Keep drawing" is active and there's a past guess to replay. */
+  showHistoryButton: boolean;
+  onShowHistory: () => void;
 }
 
 
@@ -32,6 +35,8 @@ export function GuessReveal({
   onGuessNow,
   canGuess,
   liveBudgetSpent,
+  showHistoryButton,
+  onShowHistory,
 }: GuessRevealProps) {
   // guesses[] is ordered most-likely-first (mock and Gemini both promise
   // this), so the top guess is simply the first entry.
@@ -87,6 +92,16 @@ export function GuessReveal({
           <Sparkle size={13} weight="fill" aria-hidden="true" />
           {loading ? "Thinking…" : "Guess now"}
         </button>
+
+        {showHistoryButton && (
+          <button
+            onClick={onShowHistory}
+            className="nct-focus flex items-center gap-1 rounded-full border border-nct-steel/40 px-3 py-1 font-bold uppercase tracking-wide text-nct-muted transition hover:bg-nct-700/70 hover:text-nct-ink"
+          >
+            <ClockCounterClockwise size={13} weight="bold" aria-hidden="true" />
+            How AI saw it
+          </button>
+        )}
       </div>
 
       {liveGuessing && liveBudgetSpent && (

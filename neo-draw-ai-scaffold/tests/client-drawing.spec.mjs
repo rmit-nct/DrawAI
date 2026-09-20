@@ -35,11 +35,18 @@ await page.addInitScript(() => {
 });
 
 await page.goto(URL, { waitUntil: 'networkidle' });
-await page.mouse.click(20, 20); // arms background music (blocked until a user gesture)
+await page.getByLabel(/your name/i).fill('Playwright Bot');
+await page.getByRole('button', { name: /^start game$/i }).click(); // dismiss the start screen; also arms background music
 await page.waitForTimeout(900);
 
 const canvas = page.locator('canvas').first();
 await canvas.waitFor();
+
+// The mock guesser randomly "recognises" the prompt as strokes are drawn, and
+// live guessing (on by default, unmetered in mock mode) would otherwise end
+// a round early at random behind this whole suite's back — every AI-related
+// check below already drives guesses explicitly via "Guess now".
+await page.getByRole('checkbox', { name: /live/i }).uncheck();
 
 const inkCount = async () =>
   page.evaluate(() => {
@@ -220,19 +227,35 @@ const scoreDigits = (await page.locator('[data-testid="score-value"]').innerText
 log('T23b displayed score settles to the real value', scoreDigits === '0', scoreDigits);
 
 // ---------- T24: timer pulses when urgent (<=10s left) ----------
+// Fresh round first: by this point in the suite, real wall-clock time spent
+// on earlier steps could already have eaten well into the 30s budget, so the
+// +18s jump below could overshoot past 0 instead of landing in the urgent
+// window (or disable "Guess now" for T14/T15 right after).
+await page.getByRole('button', { name: /new round/i }).first().click();
+await page.waitForTimeout(300);
 await page.evaluate(() => {
-  const realNow = Date.now;
+  window.__realDateNow = Date.now.bind(Date);
   let offset = 0;
   window.__advance = (ms) => { offset += ms; };
-  Date.now = () => realNow.call(Date) + offset;
+  Date.now = () => window.__realDateNow() + offset;
 });
-await page.evaluate(() => window.__advance(18000)); // 30s round -> a few seconds left, safely inside the urgent (<=10s) window with margin on both sides
+await page.evaluate(() => window.__advance(22000)); // 30s round -> 8s left, safely inside the urgent (<=10s) window with margin on both sides
 await page.waitForTimeout(400); // one 250ms timer tick, plus margin
 const ringWrapperClass = await page.evaluate(() => {
   const timerEl = document.querySelector('[role="timer"]');
   return timerEl?.closest('[title="Time left"]')?.className ?? '';
 });
 log('T24 timer ring pulses in the urgent window', /nct-pulse/.test(ringWrapperClass), ringWrapperClass);
+
+// Undo the Date.now patch and start a fresh round: T14/T15 below test API
+// error handling, not the timer, and a stale +18s offset left in place would
+// race the round's 30s budget and disable "Guess now" out from under them.
+await page.evaluate(() => { Date.now = window.__realDateNow; });
+await page.getByRole('button', { name: /new round/i }).first().click();
+await page.waitForTimeout(400);
+// That reset also cleared the canvas (New Round wipes strokes), and T14/T15
+// need ink on it to enable "Guess now" — draw a quick stroke to restore it.
+await stroke([[0.3, 0.3], [0.6, 0.5], [0.4, 0.7]]);
 
 // ---------- T25: scoreboard treatment is applied ----------
 const scoreboardCount = await page.locator('.nct-scoreboard').count();

@@ -22,10 +22,12 @@ interface WebcamGestureLayerProps {
   onCycleColor?: () => void;
   /** Hold a thumbs up to fire. */
   onCycleBrushSize?: () => void;
+  /** Hold a pointing finger to fire. */
+  onGuessNow?: () => void;
 }
 
 /** The static shapes that act as one-shot, hold-to-fire commands. */
-type HeldGesture = "none" | "fist" | "openPalm" | "peace" | "thumbsUp";
+type HeldGesture = "none" | "fist" | "openPalm" | "peace" | "thumbsUp" | "point";
 
 /** How long a shape must be held, stationary, before it fires. */
 const GESTURE_HOLD_MS = 550;
@@ -36,6 +38,7 @@ export const GESTURE_EMOJI: Record<"pinch" | Exclude<HeldGesture, "none">, strin
   openPalm: "✋",
   peace: "✌️",
   thumbsUp: "👍",
+  point: "👉",
 };
 
 const GESTURE_HINT: Record<Exclude<HeldGesture, "none">, string> = {
@@ -43,6 +46,7 @@ const GESTURE_HINT: Record<Exclude<HeldGesture, "none">, string> = {
   openPalm: "an open palm — clearing",
   peace: "a peace sign — changing colour",
   thumbsUp: "a thumbs up — changing brush size",
+  point: "a pointing finger — guessing now",
 };
 
 /**
@@ -68,6 +72,7 @@ export function WebcamGestureLayer({
   onClear,
   onCycleColor,
   onCycleBrushSize,
+  onGuessNow,
 }: WebcamGestureLayerProps) {
   const wasPinching = useRef(false);
   const pausedRef = useRef(paused);
@@ -76,6 +81,7 @@ export function WebcamGestureLayer({
   const onClearRef = useRef(onClear);
   const onCycleColorRef = useRef(onCycleColor);
   const onCycleBrushSizeRef = useRef(onCycleBrushSize);
+  const onGuessNowRef = useRef(onGuessNow);
 
   const [handVisible, setHandVisible] = useState(false);
   // Which held-shape command is currently being tracked, and any brief
@@ -117,6 +123,10 @@ export function WebcamGestureLayer({
   useEffect(() => {
     onCycleBrushSizeRef.current = onCycleBrushSize;
   }, [onCycleBrushSize]);
+
+  useEffect(() => {
+    onGuessNowRef.current = onGuessNow;
+  }, [onGuessNow]);
 
   const flashFired = useCallback((message: string) => {
     setFiredMessage(message);
@@ -165,15 +175,16 @@ export function WebcamGestureLayer({
 
       wasPinching.current = result.isPinching;
 
-      // Static-shape commands: fist/open-palm/peace/thumbs-up fire once after
-      // being held steady for GESTURE_HOLD_MS, then require the hand to
+      // Static-shape commands: fist/open-palm/peace/thumbs-up/point fire once
+      // after being held steady for GESTURE_HOLD_MS, then require the hand to
       // change shape again before they can re-fire — so holding a fist
       // doesn't undo the whole drawing in one go.
       const shape: HeldGesture =
         result.gesture === "fist" ||
         result.gesture === "openPalm" ||
         result.gesture === "peace" ||
-        result.gesture === "thumbsUp"
+        result.gesture === "thumbsUp" ||
+        result.gesture === "point"
           ? result.gesture
           : "none";
 
@@ -199,6 +210,9 @@ export function WebcamGestureLayer({
         } else if (shape === "thumbsUp") {
           onCycleBrushSizeRef.current?.();
           flashFired("Brush size changed");
+        } else if (shape === "point") {
+          onGuessNowRef.current?.();
+          flashFired("Guessing now");
         }
       }
     },
@@ -277,7 +291,9 @@ export function WebcamGestureLayer({
             <span className="font-bold text-nct-amber">{GESTURE_EMOJI.peace} peace sign</span> held
             to change colour ·{" "}
             <span className="font-bold text-nct-amber">{GESTURE_EMOJI.thumbsUp} thumbs up</span> held
-            to change brush size. Look at the canvas — that&apos;s your camera.
+            to change brush size ·{" "}
+            <span className="font-bold text-nct-amber">{GESTURE_EMOJI.point} pointing finger</span>{" "}
+            held to guess now. Look at the canvas — that&apos;s your camera.
           </p>
         )}
       </div>

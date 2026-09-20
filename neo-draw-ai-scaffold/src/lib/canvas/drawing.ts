@@ -1,4 +1,4 @@
-import type { Point, Stroke } from "@/types";
+import type { Point, Stroke, StrokeBounds } from "@/types";
 
 /**
  * Pure canvas drawing helpers.
@@ -132,6 +132,30 @@ export function clamp(v: number, min: number, max: number): number {
 /** True when there is nothing but background on the canvas. */
 export function isBlank(strokes: Stroke[]): boolean {
   return strokes.every((s) => !s.points || s.points.length === 0);
+}
+
+/**
+ * Bounding box (logical coords) of every point across the given strokes, or
+ * null if none of them have any points. Used to approximate "what part of
+ * the drawing changed" between two guesses — see StrokeBounds.
+ */
+export function computeStrokeBounds(strokes: Stroke[]): StrokeBounds | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const stroke of strokes) {
+    for (const p of stroke.points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+
+  if (!Number.isFinite(minX)) return null;
+  return { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
 }
 
 /**

@@ -178,10 +178,20 @@ body {
   animation: nct-round-wipe 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+@keyframes nct-countdown-pop {
+  0% { opacity: 0; transform: scale(0.6); }
+  35% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.nct-countdown-pop {
+  animation: nct-countdown-pop 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .nct-pulse,
   .nct-rise,
-  .nct-round-wipe {
+  .nct-round-wipe,
+  .nct-countdown-pop {
     animation: none;
   }
 }

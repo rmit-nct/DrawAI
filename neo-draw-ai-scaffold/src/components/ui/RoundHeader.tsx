@@ -9,6 +9,7 @@ interface RoundHeaderProps {
   totalSeconds: number;
   score: number;
   round: number;
+  totalRounds: number;
   isRoundOver: boolean;
   onNewRound: () => void;
   muted: boolean;
@@ -70,6 +71,7 @@ export function RoundHeader({
   totalSeconds,
   score,
   round,
+  totalRounds,
   isRoundOver,
   onNewRound,
   muted,
@@ -130,7 +132,7 @@ export function RoundHeader({
             <div className="pl-2.5 text-right sm:pl-3">
               <div className="nct-label">Round</div>
               <div className="font-mono text-lg font-black tracking-wide tabular-nums text-nct-ink sm:text-xl">
-                {round}
+                {round}/{totalRounds}
               </div>
             </div>
           </div>
