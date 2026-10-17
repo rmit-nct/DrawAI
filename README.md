@@ -196,6 +196,9 @@ public/
 - Multiplayer rooms over WebSockets, so several players draw and guess in one session.
 - Demo video and deployed Vercel URL for submission.
 
+## Demo Video Link
+https://youtu.be/pAzVw3SZheE
+
 ## Deadline
 
 Project deadline: **17/9/2026**

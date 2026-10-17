@@ -4,6 +4,9 @@ A drawing game by **Neo Culture Tech**, inspired by Google's *Quick, Draw!* — 
 mouse, your finger, or a pinch of your hand in front of the webcam, race a timer, and let an AI
 model guess what you've drawn.
 
+## Demo Video Link
+https://youtu.be/pAzVw3SZheE
+
 ## Purpose
 
 NEO DrawAI demonstrates full-stack web development, real-time interaction, and computer-vision
